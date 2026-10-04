@@ -1,0 +1,16 @@
+Aset pihak ketiga di mod Avalon
+================================
+
+textures/gui/loading/background.png
+  Diolah (crop + pewarnaan ungu) dari "Tarantula Nebula by JWST".
+  Kredit: NASA, ESA, CSA, STScI, Webb ERO Production Team.
+  Lisensi: domain publik (Public Domain).
+  Sumber: https://commons.wikimedia.org/wiki/File:Tarantula_Nebula_by_JWST.jpg
+
+textures/gui/loading/circle.png, mote.png
+  Dibuat khusus untuk mod ini.
+
+meshes/excalibur.obj, textures/entity/excalibur.png
+  Dikonversi dari "Sword" oleh MiniPoly (format GLB ke OBJ, ukuran dinormalkan).
+  Lisensi: CC0 1.0 (domain publik), tidak wajib mencantumkan nama.
+  Sumber: https://poly.pizza/m/toZKKGhFWc

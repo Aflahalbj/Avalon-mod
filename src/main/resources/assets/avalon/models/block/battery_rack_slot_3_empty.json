@@ -1,0 +1,68 @@
+{
+  "textures": {
+    "parts": "avalon:block/battery_rack_parts",
+    "battery": "avalon:block/battery",
+    "particle": "avalon:block/battery_rack_parts"
+  },
+  "elements": [
+    {
+      "from": [
+        12,
+        6,
+        -0.06
+      ],
+      "to": [
+        14,
+        7,
+        0
+      ],
+      "faces": {
+        "north": {
+          "texture": "#parts",
+          "uv": [
+            8,
+            6,
+            10,
+            7
+          ]
+        },
+        "up": {
+          "texture": "#parts",
+          "uv": [
+            8,
+            6,
+            10,
+            7
+          ]
+        },
+        "down": {
+          "texture": "#parts",
+          "uv": [
+            8,
+            6,
+            10,
+            7
+          ]
+        },
+        "east": {
+          "texture": "#parts",
+          "uv": [
+            8,
+            6,
+            10,
+            7
+          ]
+        },
+        "west": {
+          "texture": "#parts",
+          "uv": [
+            8,
+            6,
+            10,
+            7
+          ]
+        }
+      }
+    }
+  ]
+}

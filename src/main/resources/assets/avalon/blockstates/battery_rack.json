@@ -1,0 +1,741 @@
+{
+  "multipart": [
+    {
+      "when": {
+        "facing": "north"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_0": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_empty"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_0": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_battery"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_0": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_closed"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_1": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_empty"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_1": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_battery"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_1": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_closed"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_2": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_empty"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_2": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_battery"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_2": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_closed"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_3": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_empty"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_3": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_battery"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_3": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_closed"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_4": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_empty"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_4": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_battery"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_4": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_closed"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_5": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_empty"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_5": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_battery"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "slot_5": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_closed"
+      }
+    },
+    {
+      "when": {
+        "facing": "east"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_0": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_empty",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_0": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_battery",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_0": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_closed",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_1": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_empty",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_1": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_battery",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_1": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_closed",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_2": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_empty",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_2": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_battery",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_2": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_closed",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_3": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_empty",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_3": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_battery",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_3": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_closed",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_4": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_empty",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_4": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_battery",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_4": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_closed",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_5": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_empty",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_5": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_battery",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "slot_5": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_closed",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "south"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_0": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_empty",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_0": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_battery",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_0": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_closed",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_1": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_empty",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_1": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_battery",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_1": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_closed",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_2": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_empty",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_2": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_battery",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_2": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_closed",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_3": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_empty",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_3": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_battery",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_3": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_closed",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_4": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_empty",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_4": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_battery",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_4": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_closed",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_5": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_empty",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_5": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_battery",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "slot_5": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_closed",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "west"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_0": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_empty",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_0": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_battery",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_0": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_0_closed",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_1": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_empty",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_1": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_battery",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_1": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_1_closed",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_2": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_empty",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_2": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_battery",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_2": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_2_closed",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_3": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_empty",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_3": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_battery",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_3": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_3_closed",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_4": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_empty",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_4": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_battery",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_4": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_4_closed",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_5": "empty"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_empty",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_5": "battery"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_battery",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "slot_5": "closed"
+      },
+      "apply": {
+        "model": "avalon:block/battery_rack_slot_5_closed",
+        "y": 270
+      }
+    }
+  ]
+}

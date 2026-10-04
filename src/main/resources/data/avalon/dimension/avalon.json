@@ -1,0 +1,11 @@
+{
+  "type": "avalon:avalon",
+  "generator": {
+    "type": "minecraft:noise",
+    "biome_source": {
+      "type": "minecraft:fixed",
+      "biome": "avalon:avalon"
+    },
+    "settings": "minecraft:floating_islands"
+  }
+}

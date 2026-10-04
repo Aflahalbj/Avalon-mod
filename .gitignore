@@ -1,0 +1,43 @@
+# Gradle
+build/
+.gradle/
+
+# ForgeGradle
+run/
+runs/
+run-data/
+forge*changelog.txt
+
+# IntelliJ IDEA
+.idea/
+out/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.eclipse/
+.settings/
+.classpath
+.project
+.metadata/
+bin/
+
+# VS Code
+.vscode/
+
+# JVM crash / replay logs
+hs_err_pid*.log
+replay_pid*.log
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code
+.claude/settings.local.json
