@@ -43,6 +43,8 @@ public class VotingManager {
     public static final String PDC_KEY_VOTE_TYPE = "vote_type";
     public static final String VOTE_SETUJU        = "setuju";
     public static final String VOTE_TOLAK         = "tolak";
+    /** Tag kertas suara (belum memilih). */
+    private static final String VOTE_BELUM        = "belum";
     private static final int MAX_REJECT_STREAK   = 5;   // Rule 1
 
     private final GameManager  gameManager;
@@ -73,6 +75,11 @@ public class VotingManager {
 
     public boolean isVotingActive() { return votingActive; }
 
+    /** Suara player saat ini ("setuju" / "tolak"), atau null kalau belum memilih. */
+    public String getVote(ServerPlayer player) {
+        return votes.get(player.getGameProfile().getName());
+    }
+
     /** Reset reject streak — dipanggil saat misi selesai. */
     public void resetRejectStreak() { rejectStreak = 0; }
 
@@ -98,7 +105,7 @@ public class VotingManager {
             Txt.t("  Tim yang dipilih: ", ChatFormatting.WHITE)
                 .append(Txt.t(String.join(", ", team), ChatFormatting.GREEN, ChatFormatting.BOLD))
         );
-        broadcast(Txt.t("  Klik kanan untuk memberikan suara.", ChatFormatting.GRAY));
+        broadcast(Txt.t("  Klik kiri = Tolak, klik kanan = Setuju.", ChatFormatting.GRAY));
         broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.DARK_AQUA));
         broadcast(Txt.blank());
 
@@ -134,7 +141,8 @@ public class VotingManager {
 
         votes.put(name, voteType);
 
-        // ITEM TIDAK DIHAPUS — biarkan player bisa ganti suara kapan saja
+        // Item tetap ada (bisa ganti suara kapan saja), hanya berganti rupa sesuai pilihannya
+        giveVoteItems(player);
 
         // Update kepala melayang (hapus lama, spawn baru sesuai pilihan baru)
         spawnVoteHead(player, voteType);
@@ -381,17 +389,19 @@ public class VotingManager {
 
     // ── Item Voting ──────────────────────────────────────────────────────────
 
+    /**
+     * Inventory cuma 1 slot: satu item untuk dua pilihan (klik kanan = Setuju, klik kiri = Tolak).
+     * Yang belum memilih memegang kertas suara; setelah memilih, itemnya berubah jadi kepala pilihannya.
+     */
     private void giveVoteItems(ServerPlayer player) {
-        // Hotbar 1 (slot 0) = Tolak, Hotbar 2 (slot 1) = Setuju
-        player.getInventory().setItem(0, makeTolakHead());
-        player.getInventory().setItem(1, makeSetujuHead());
+        String voted = votes.get(player.getGameProfile().getName());
+        ItemStack item = voted == null ? makeBallot()
+                : voted.equals(VOTE_SETUJU) ? makeSetujuHead() : makeTolakHead();
+        player.getInventory().setItem(0, item);
     }
 
     private void removeVoteItems(ServerPlayer player) {
-        ItemStack s0 = player.getInventory().getItem(0);
-        ItemStack s1 = player.getInventory().getItem(1);
-        if (isVoteItem(s0)) player.getInventory().setItem(0, ItemStack.EMPTY);
-        if (isVoteItem(s1)) player.getInventory().setItem(1, ItemStack.EMPTY);
+        if (isVoteItem(player.getInventory().getItem(0))) player.getInventory().setItem(0, ItemStack.EMPTY);
     }
 
     private void removeVoteItemsFromAll() {
@@ -401,24 +411,31 @@ public class VotingManager {
     }
 
     public boolean isVoteItem(ItemStack item) {
-        if (item == null || item.isEmpty() || !item.is(Items.PLAYER_HEAD)) return false;
+        if (item == null || item.isEmpty()) return false;
         return AvalonItems.hasTag(item, PDC_KEY_VOTE_TYPE);
     }
 
-    public String getVoteType(ItemStack item) {
-        if (item == null || item.isEmpty() || !item.is(Items.PLAYER_HEAD)) return null;
-        return AvalonItems.getTag(item, PDC_KEY_VOTE_TYPE);
+    private static List<Component> voteLore() {
+        return List.of(
+            Txt.t("Klik kanan: SETUJU", ChatFormatting.GREEN),
+            Txt.t("Klik kiri: TOLAK", ChatFormatting.RED),
+            Txt.t("Kamu bisa mengganti suara kapan saja.", ChatFormatting.GRAY)
+        );
+    }
+
+    /** Kertas suara: dipegang player yang belum memilih. */
+    private ItemStack makeBallot() {
+        ItemStack ballot = AvalonItems.named(Items.PAPER,
+            Txt.t("Klik kiri: TOLAK  |  Klik kanan: SETUJU", ChatFormatting.AQUA, ChatFormatting.BOLD), voteLore());
+        AvalonItems.setTag(ballot, PDC_KEY_VOTE_TYPE, VOTE_BELUM);
+        return ballot;
     }
 
     private ItemStack makeTolakHead() {
         return makeTextureHead(
             TEXTURE_TOLAK,
             Txt.t("✘ TOLAK", ChatFormatting.RED, ChatFormatting.BOLD),
-            List.of(
-                Txt.t("Klik kanan untuk menolak tim.", ChatFormatting.GRAY),
-                Txt.t("Tim tidak akan menjalankan misi.", ChatFormatting.DARK_RED),
-                Txt.t("Kamu bisa mengganti suara kapan saja.", ChatFormatting.GRAY)
-            ),
+            voteLore(),
             VOTE_TOLAK
         );
     }
@@ -427,11 +444,7 @@ public class VotingManager {
         return makeTextureHead(
             TEXTURE_SETUJU,
             Txt.t("✔ SETUJU", ChatFormatting.GREEN, ChatFormatting.BOLD),
-            List.of(
-                Txt.t("Klik kanan untuk menyetujui tim.", ChatFormatting.GRAY),
-                Txt.t("Tim akan menjalankan misi.", ChatFormatting.DARK_GREEN),
-                Txt.t("Kamu bisa mengganti suara kapan saja.", ChatFormatting.GRAY)
-            ),
+            voteLore(),
             VOTE_SETUJU
         );
     }

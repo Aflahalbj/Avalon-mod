@@ -10,11 +10,13 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 /**
  * Pembaca file .schem (Sponge Schematic v2/v3, format WorldEdit) + paste ke dunia.
@@ -85,11 +87,19 @@ public final class SpongeSchematic {
      * (udara ikut ditempel). Mengembalikan jumlah blok yang berubah.
      */
     public int paste(ServerLevel level, BlockPos origin) {
-        BlockState[] states = resolvePalette(level);
+        return paste(level, origin, Rotation.NONE, UnaryOperator.identity());
+    }
 
-        int baseX = origin.getX() + offsetX;
-        int baseY = origin.getY() + offsetY;
-        int baseZ = origin.getZ() + offsetZ;
+    /**
+     * Seperti {@link #paste(ServerLevel, BlockPos)}, tapi bangunannya diputar dulu mengelilingi
+     * {@code origin} (setara //rotate lalu //paste), dan tiap blok dilewatkan ke {@code adjust}
+     * sebelum ditempel.
+     */
+    public int paste(ServerLevel level, BlockPos origin, Rotation rotation, UnaryOperator<BlockState> adjust) {
+        BlockState[] states = resolvePalette(level);
+        for (int s = 0; s < states.length; s++) {
+            if (states[s] != null) states[s] = adjust.apply(states[s].rotate(rotation));
+        }
 
         // Tanpa update tetangga/bentuk: tanaman & dirt path tidak rontok saat ditempel
         int flags = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE;
@@ -114,7 +124,9 @@ public final class SpongeSchematic {
                 int x = index % width;
                 int z = (index / width) % length;
                 int y = index / (width * length);
-                pos.set(baseX + x, baseY + y, baseZ + z);
+                // Posisi relatif terhadap origin, diputar, baru digeser ke dunia
+                BlockPos relative = new BlockPos(offsetX + x, offsetY + y, offsetZ + z).rotate(rotation);
+                pos.setWithOffset(origin, relative);
                 if (level.getBlockState(pos) != state && level.setBlock(pos, state, flags)) {
                     changed++;
                 }

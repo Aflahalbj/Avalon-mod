@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -36,6 +37,7 @@ import java.util.List;
 
 /**
  * Rak baterai: seperti chiseled bookshelf, tapi 6 lubang di sisi depannya diisi baterai.
+ * Baterai dipasang & diambil dengan klik kiri di lubangnya.
  * Tiap lubang bisa ditutup supaya jumlah lubang yang terbuka sama dengan jumlah anggota tim misi.
  *
  * <pre>
@@ -157,6 +159,15 @@ public class BatteryRackBlock extends BaseEntityBlock {
         return true;
     }
 
+    /** State rak yang semua lubangnya terisi baterai (isi block entity-nya kosong: baterai baru saat diambil). */
+    public BlockState fullState(Direction facing) {
+        BlockState state = defaultBlockState().setValue(FACING, facing);
+        for (EnumProperty<Slot> slot : SLOTS) {
+            state = state.setValue(slot, Slot.BATTERY);
+        }
+        return state;
+    }
+
     /** Kosongkan semua lubang yang terisi tanpa mengeluarkan baterainya (misalnya saat misi selesai). */
     public static boolean clearBatteries(Level level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
@@ -183,51 +194,106 @@ public class BatteryRackBlock extends BaseEntityBlock {
 
     // ── Interaksi ─────────────────────────────────────────────────────────────
 
+    /**
+     * Aturan siapa yang boleh mengambil / memasang baterai. Bawaannya bebas;
+     * selama game diganti aturan misi (lihat BatteryMission).
+     */
+    public interface Access {
+        Access OPEN = new Access() {};
+
+        /** @param battery item di lubang itu (kosong kalau lubangnya diisi lewat /setblock) */
+        default boolean mayTake(ServerPlayer player, BlockPos pos, int slot, ItemStack battery) {
+            return true;
+        }
+
+        /** Dipanggil setelah {@link #mayTake} lolos; boleh mengubah item yang diterima player. */
+        default ItemStack onTaken(ServerPlayer player, BlockPos pos, int slot, ItemStack battery) {
+            return battery;
+        }
+
+        default boolean mayPut(ServerPlayer player, BlockPos pos, int slot, ItemStack battery) {
+            return true;
+        }
+
+        /** Dipanggil setelah baterai terpasang dan blockstate-nya diperbarui. */
+        default void onPut(ServerPlayer player, BlockPos pos, int slot) {}
+
+        /** Menutup / membuka lubang dengan tangan kosong (creative). */
+        default boolean mayEdit(ServerPlayer player, BlockPos pos) {
+            return true;
+        }
+    }
+
+    public static Access access = Access.OPEN;
+
+    /**
+     * Klik kiri lubang rak: ambil baterai dari lubang yang terisi, atau pasang baterai yang dipegang
+     * ke lubang kosong. Dipanggil server saat menerima paket klik dari client (AvalonNetwork.RackClick).
+     */
+    public static void leftClick(ServerPlayer player, BlockPos pos, Direction face, Vec3 hit) {
+        Level level = player.level();
+        BlockState state = level.getBlockState(pos);
+        if (!(state.getBlock() instanceof BatteryRackBlock)) return;
+        int slot = slotAt(state, pos, face, hit);
+        if (slot < 0) return;
+
+        EnumProperty<Slot> property = SLOTS.get(slot);
+        Slot current = state.getValue(property);
+        ItemStack held = player.getMainHandItem();
+
+        if (current == Slot.BATTERY) {
+            ItemStack stored = level.getBlockEntity(pos) instanceof BatteryRackBlockEntity rack
+                    ? rack.get(slot)
+                    : ItemStack.EMPTY;
+            if (!access.mayTake(player, pos, slot, stored)) return;
+            ItemStack battery = access.onTaken(player, pos, slot, takeBattery(level, pos, slot));
+            if (!player.getInventory().add(battery)) player.drop(battery, false);
+            level.setBlock(pos, state.setValue(property, Slot.EMPTY), Block.UPDATE_ALL);
+            sound(level, pos, SoundEvents.ITEM_FRAME_REMOVE_ITEM, 1.0f, 0.8f);
+        } else if (current == Slot.EMPTY && held.is(ModBlocks.BATTERY.get())) {
+            if (!access.mayPut(player, pos, slot, held)) return;
+            // Simpan itemnya utuh (termasuk tag), supaya misi bisa membedakan baterai
+            ItemStack battery = player.getAbilities().instabuild ? held.copyWithCount(1) : held.split(1);
+            if (level.getBlockEntity(pos) instanceof BatteryRackBlockEntity rack) rack.put(slot, battery);
+            level.setBlock(pos, state.setValue(property, Slot.BATTERY), Block.UPDATE_ALL);
+            sound(level, pos, SoundEvents.RESPAWN_ANCHOR_CHARGE, 0.7f, 1.4f + slot * 0.08f);
+            Vec3 at = slotCenter(state, pos, slot);
+            ((ServerLevel) level).sendParticles(ParticleTypes.ELECTRIC_SPARK, at.x, at.y, at.z, 8, 0.08, 0.12, 0.08, 0.4);
+            access.onPut(player, pos, slot);
+        }
+    }
+
+    /**
+     * Apakah klik kiri di titik ini dipakai rak (ambil / pasang baterai) dan bukan klik kiri biasa.
+     * Dipakai client untuk memutuskan apakah kliknya dikirim sebagai klik rak.
+     */
+    public static boolean wantsLeftClick(BlockState state, BlockPos pos, Direction face, Vec3 hit, ItemStack held) {
+        int slot = slotAt(state, pos, face, hit);
+        if (slot < 0) return false;
+        Slot current = state.getValue(SLOTS.get(slot));
+        return current == Slot.BATTERY || (current == Slot.EMPTY && held.is(ModBlocks.BATTERY.get()));
+    }
+
+    /** Klik kanan: hanya untuk menutup / membuka lubang (creative, tangan kosong). Baterai lewat klik kiri. */
     @Override
     @SuppressWarnings("deprecation")
     public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player,
                                  InteractionHand hand, BlockHitResult hit) {
-        int slot = hitSlot(state, pos, hit);
+        int slot = slotAt(state, pos, hit.getDirection(), hit.getLocation());
         if (slot < 0) return InteractionResult.PASS;
-
-        EnumProperty<Slot> property = SLOTS.get(slot);
-        Slot current = state.getValue(property);
-        ItemStack held = player.getItemInHand(hand);
-
-        if (current == Slot.BATTERY) {
-            // Lubang terisi: ambil baterainya
-            if (!level.isClientSide) {
-                ItemStack battery = takeBattery(level, pos, slot);
-                if (!player.getInventory().add(battery)) player.drop(battery, false);
-                level.setBlock(pos, state.setValue(property, Slot.EMPTY), Block.UPDATE_ALL);
-                sound(level, pos, SoundEvents.ITEM_FRAME_REMOVE_ITEM, 1.0f, 0.8f);
-            }
-            return InteractionResult.sidedSuccess(level.isClientSide);
+        Slot current = state.getValue(SLOTS.get(slot));
+        if (current == Slot.BATTERY) return InteractionResult.PASS;
+        if (!player.getAbilities().instabuild || !player.getItemInHand(hand).isEmpty() || hand != InteractionHand.MAIN_HAND) {
+            return InteractionResult.PASS;
         }
 
-        if (current == Slot.EMPTY && held.is(ModBlocks.BATTERY.get())) {
-            if (!level.isClientSide) {
-                // Simpan itemnya utuh (termasuk tag), supaya misi bisa membedakan baterai
-                ItemStack battery = player.getAbilities().instabuild ? held.copyWithCount(1) : held.split(1);
-                if (level.getBlockEntity(pos) instanceof BatteryRackBlockEntity rack) rack.put(slot, battery);
-                level.setBlock(pos, state.setValue(property, Slot.BATTERY), Block.UPDATE_ALL);
-                sound(level, pos, SoundEvents.RESPAWN_ANCHOR_CHARGE, 0.7f, 1.4f + slot * 0.08f);
-                Vec3 at = slotCenter(state, pos, slot);
-                ((ServerLevel) level).sendParticles(ParticleTypes.ELECTRIC_SPARK, at.x, at.y, at.z, 8, 0.08, 0.12, 0.08, 0.4);
-            }
-            return InteractionResult.sidedSuccess(level.isClientSide);
+        if (player instanceof ServerPlayer serverPlayer) {
+            if (!access.mayEdit(serverPlayer, pos)) return InteractionResult.PASS;
+            boolean close = current == Slot.EMPTY;
+            level.setBlock(pos, state.setValue(SLOTS.get(slot), close ? Slot.CLOSED : Slot.EMPTY), Block.UPDATE_ALL);
+            sound(level, pos, close ? SoundEvents.IRON_TRAPDOOR_CLOSE : SoundEvents.IRON_TRAPDOOR_OPEN, 0.8f, 1.3f);
         }
-
-        // Creative, tangan kosong: tutup / buka lubang
-        if (player.getAbilities().instabuild && held.isEmpty() && hand == InteractionHand.MAIN_HAND) {
-            if (!level.isClientSide) {
-                boolean close = current == Slot.EMPTY;
-                level.setBlock(pos, state.setValue(property, close ? Slot.CLOSED : Slot.EMPTY), Block.UPDATE_ALL);
-                sound(level, pos, close ? SoundEvents.IRON_TRAPDOOR_CLOSE : SoundEvents.IRON_TRAPDOOR_OPEN, 0.8f, 1.3f);
-            }
-            return InteractionResult.sidedSuccess(level.isClientSide);
-        }
-        return InteractionResult.PASS;
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
     private static void sound(Level level, BlockPos pos, SoundEvent sound, float volume, float pitch) {
@@ -235,11 +301,11 @@ public class BatteryRackBlock extends BaseEntityBlock {
     }
 
     /** Lubang yang diklik, atau -1 kalau yang diklik bukan sisi depan. */
-    private static int hitSlot(BlockState state, BlockPos pos, BlockHitResult hit) {
+    private static int slotAt(BlockState state, BlockPos pos, Direction face, Vec3 hit) {
         Direction facing = state.getValue(FACING);
-        if (hit.getDirection() != facing) return -1;
+        if (face != facing) return -1;
 
-        Vec3 local = hit.getLocation().subtract(Vec3.atCenterOf(pos));
+        Vec3 local = hit.subtract(Vec3.atCenterOf(pos));
         // Kiri orang yang melihat sisi depan
         Direction left = facing.getClockWise();
         double fromLeft = (0.5 - (local.x * left.getStepX() + local.z * left.getStepZ())) * 16.0;

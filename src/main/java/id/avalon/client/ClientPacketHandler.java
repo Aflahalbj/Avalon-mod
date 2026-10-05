@@ -28,6 +28,18 @@ public final class ClientPacketHandler {
         ClientState.movementLocked = locked;
     }
 
+    public static void oneSlot(boolean active) {
+        ClientState.oneSlot = active;
+    }
+
+    public static void pillarCutscene(AvalonNetwork.PillarCutscene msg) {
+        if (msg.active()) {
+            PillarCutsceneClient.start(msg.pos(), msg.faceX(), msg.faceZ(), msg.duration());
+        } else {
+            PillarCutsceneClient.stop();
+        }
+    }
+
     public static void rotate(float yaw, float pitch) {
         applyRotation(yaw, pitch);
     }

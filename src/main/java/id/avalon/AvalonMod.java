@@ -1,5 +1,6 @@
 package id.avalon;
 
+import id.avalon.block.BatteryRackBlock;
 import id.avalon.block.ModBlocks;
 import id.avalon.commands.AvalonCommands;
 import id.avalon.core.AvalonLog;
@@ -14,15 +15,18 @@ import id.avalon.listeners.CustomRoleListener;
 import id.avalon.listeners.CutsceneListener;
 import id.avalon.listeners.ItemGuard;
 import id.avalon.listeners.MissionListener;
+import id.avalon.listeners.OneSlotListener;
 import id.avalon.listeners.PlayerOfflineHandler;
 import id.avalon.listeners.PvPProtectionListener;
 import id.avalon.listeners.TeamBookListener;
 import id.avalon.listeners.TeamSelectionListener;
 import id.avalon.listeners.VotingListener;
+import id.avalon.managers.BatteryMission;
 import id.avalon.managers.GameManager;
 import id.avalon.managers.VotingManager;
 import id.avalon.network.AvalonNetwork;
 import id.avalon.network.ClientState;
+import id.avalon.world.AvalonPillars;
 import id.avalon.world.AvalonPortal;
 import id.avalon.world.AvalonSeats;
 import net.minecraft.server.level.ServerPlayer;
@@ -80,6 +84,9 @@ public class AvalonMod {
         votingManager = new VotingManager(gameManager);
         gameManager.setVotingManager(votingManager);
 
+        // Selama game, rak baterai mengikuti aturan misi
+        BatteryRackBlock.access = gameManager.getBatteryMission();
+
         AssassinationListener assassinationListener = new AssassinationListener(gameManager);
         MissionListener missionListener = new MissionListener(gameManager);
         TeamBookListener teamBookListener = new TeamBookListener(gameManager);
@@ -93,6 +100,8 @@ public class AvalonMod {
         MinecraftForge.EVENT_BUS.register(assassinationListener);
         MinecraftForge.EVENT_BUS.register(new PvPProtectionListener(gameManager));
         MinecraftForge.EVENT_BUS.register(new PlayerOfflineHandler(gameManager));
+        OneSlotListener oneSlotListener = new OneSlotListener(gameManager);
+        MinecraftForge.EVENT_BUS.register(oneSlotListener);
         MinecraftForge.EVENT_BUS.register(this);
 
         // Aturan klik inventory (InventoryClickEvent / InventoryDragEvent)
@@ -100,7 +109,8 @@ public class AvalonMod {
                 assassinationListener,
                 missionListener,
                 teamBookListener,
-                votingListener
+                votingListener,
+                oneSlotListener
         );
     }
 
@@ -131,6 +141,8 @@ public class AvalonMod {
     public void onServerStarted(ServerStartedEvent event) {
         teamSelectionListener.startAnimation();
         AvalonPortal.ensurePlaced(event.getServer());
+        AvalonPillars.ensurePlaced(event.getServer());
+        BatteryMission.placeSourceRacks(event.getServer());
         AvalonSeats.sync(event.getServer(), gameManager.getRegisteredPlayers().size());
         AvalonLog.info("Avalon mod enabled!");
     }

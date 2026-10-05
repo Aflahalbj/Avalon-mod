@@ -17,6 +17,9 @@ public final class ClientState {
 
     public static boolean movementLocked = false;
 
+    /** Inventory 1 slot (selama game): hotbar diganti satu slot, inventory tidak bisa dibuka. */
+    public static boolean oneSlot = false;
+
     /** entityId → scale (pengganti Attribute.SCALE). */
     public static final Map<Integer, Float> scales = new HashMap<>();
 
@@ -28,6 +31,7 @@ public final class ClientState {
         lockedYaw = null;
         lockedPitch = null;
         movementLocked = false;
+        oneSlot = false;
         scales.clear();
     }
 }

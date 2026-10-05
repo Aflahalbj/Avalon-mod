@@ -13,6 +13,7 @@ import net.minecraft.client.renderer.entity.player.PlayerRenderer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.EntityRenderersEvent;
+import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.MovementInputUpdateEvent;
 import net.minecraftforge.client.event.RegisterDimensionSpecialEffectsEvent;
 import net.minecraftforge.client.event.RenderGuiEvent;
@@ -23,6 +24,7 @@ import net.minecraftforge.client.event.RenderNameTagEvent;
 import net.minecraftforge.client.event.RenderPlayerEvent;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.client.event.ViewportEvent;
+import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -68,6 +70,9 @@ public final class ClientEvents {
                 RevealClient.tick();
                 KingRouletteClient.tick();
                 CrownClient.tick();
+                OneSlotHud.tick();
+                RackClient.tick();
+                PillarCutsceneClient.tick();
             }
         }
 
@@ -76,12 +81,14 @@ public final class ClientEvents {
             if (event.phase != TickEvent.Phase.START) return;
             enforceCameraLock();
             PortalCutsceneClient.setPartialTick(event.renderTickTime);
+            PillarCutsceneClient.setPartialTick(event.renderTickTime);
         }
 
         @SubscribeEvent
         public static void onCameraAngles(ViewportEvent.ComputeCameraAngles event) {
             // Kamera cutscene menggantikan kamera player sepenuhnya
             if (PortalCutsceneClient.applyCamera(event)) return;
+            if (PillarCutsceneClient.applyCamera(event)) return;
             if (ClientState.lockedYaw == null) return;
             Minecraft mc = Minecraft.getInstance();
             if (mc.options.getCameraType().isFirstPerson()) {
@@ -153,7 +160,11 @@ public final class ClientEvents {
 
         @SubscribeEvent
         public static void onComputeFov(ViewportEvent.ComputeFov event) {
-            if (PortalCutsceneClient.hasCamera()) event.setFOV(PortalCutsceneClient.fov());
+            if (PortalCutsceneClient.hasCamera()) {
+                event.setFOV(PortalCutsceneClient.fov());
+            } else if (PillarCutsceneClient.hasCamera()) {
+                event.setFOV(PillarCutsceneClient.fov());
+            }
         }
 
         @SubscribeEvent
@@ -169,13 +180,41 @@ public final class ClientEvents {
         /** Kamera cutscene bukan dari mata player: tangan first person jangan ikut digambar. */
         @SubscribeEvent
         public static void onRenderHand(RenderHandEvent event) {
-            if (PortalCutsceneClient.hasCamera()) event.setCanceled(true);
+            if (PortalCutsceneClient.hasCamera() || PillarCutsceneClient.hasCamera()) event.setCanceled(true);
         }
 
         /** Sembunyikan seluruh HUD (hotbar, crosshair, chat, ...) selama menonton cutscene. */
         @SubscribeEvent
         public static void onRenderOverlay(RenderGuiOverlayEvent.Pre event) {
-            if (PortalCutsceneClient.hasCamera()) event.setCanceled(true);
+            if (PortalCutsceneClient.hasCamera() || PillarCutsceneClient.hasCamera()) {
+                event.setCanceled(true);
+                return;
+            }
+            // Inventory 1 slot: hotbar vanilla diganti satu slot berbingkai
+            if (OneSlotHud.active() && event.getOverlay() == VanillaGuiOverlay.HOTBAR.type()) {
+                event.setCanceled(true);
+                OneSlotHud.render(event.getGuiGraphics(),
+                        event.getWindow().getGuiScaledWidth(), event.getWindow().getGuiScaledHeight());
+            }
+        }
+
+        // ── Inventory 1 slot ──────────────────────────────────────────────────
+
+        /** Roda mouse tidak mengganti slot. */
+        @SubscribeEvent
+        public static void onMouseScroll(InputEvent.MouseScrollingEvent event) {
+            if (OneSlotHud.active() && Minecraft.getInstance().screen == null) event.setCanceled(true);
+        }
+
+        @SubscribeEvent
+        public static void onInteractionKey(InputEvent.InteractionKeyMappingTriggered event) {
+            if (!event.isAttack()) return;
+            // Klik kiri lubang rak baterai = ambil / pasang; klik kiri biasanya dibatalkan
+            if (RackClient.tryClick()) {
+                event.setCanceled(true);
+                return;
+            }
+            OneSlotHud.onAttackKey();
         }
 
         /** Kelopak mata digambar paling bawah: HUD (chat, hotbar, title) tetap terlihat di atasnya. */
@@ -191,6 +230,7 @@ public final class ClientEvents {
             int height = event.getWindow().getGuiScaledHeight();
             RoleShuffleClient.renderOverlay(event.getGuiGraphics(), width, height, event.getPartialTick());
             PortalCutsceneClient.renderOverlay(event.getGuiGraphics(), width, height);
+            PillarCutsceneClient.renderOverlay(event.getGuiGraphics(), width, height);
         }
 
         /** Sisa layar putih memudar di atas layar loading Avalon. */
@@ -210,6 +250,10 @@ public final class ClientEvents {
         /** Ganti layar "Loading terrain" vanilla dengan layar Avalon saat tujuan = dimensi Avalon. */
         @SubscribeEvent
         public static void onScreenOpening(ScreenEvent.Opening event) {
+            if (OneSlotHud.blocks(event.getNewScreen())) {
+                event.setCanceled(true);
+                return;
+            }
             if (event.getNewScreen() == null || event.getNewScreen().getClass() != ReceivingLevelScreen.class) return;
             Minecraft mc = Minecraft.getInstance();
             if (mc.level != null && mc.level.dimension() == AvalonDimensions.AVALON) {
@@ -228,6 +272,7 @@ public final class ClientEvents {
             KingRouletteClient.stop();
             CrownClient.set("", -1, false);
             PillarOrbRenderer.clear();
+            PillarCutsceneClient.reset();
             ClientState.reset();
         }
     }

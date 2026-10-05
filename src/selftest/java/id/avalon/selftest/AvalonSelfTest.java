@@ -1,13 +1,19 @@
 package id.avalon.selftest;
 
 import id.avalon.AvalonMod;
+import id.avalon.block.BatteryRackBlock;
+import id.avalon.block.ModBlocks;
+import id.avalon.block.PillarBlock;
+import id.avalon.core.AvalonDimensions;
 import id.avalon.core.PlayerScale;
 import id.avalon.gui.AvalonMenu;
 import id.avalon.gui.TeamSelectionGUI;
 import id.avalon.managers.GameManager;
 import id.avalon.managers.VotingManager;
 import id.avalon.models.Role;
+import id.avalon.world.AvalonPillars;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -19,7 +25,11 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.ForgeMod;
 import net.minecraftforge.event.TickEvent;
@@ -237,13 +247,109 @@ public final class AvalonSelfTest {
         check(!(king.containerMenu instanceof AvalonMenu), "GUI tertutup setelah konfirmasi");
     }
 
+    /** Klik kanan item vote = Setuju; klik kiri (datang lewat paket dari client) = Tolak. */
+    private static void vote(ServerPlayer player, String vote) {
+        if (VotingManager.VOTE_SETUJU.equals(vote)) {
+            useSlot(player, 0);
+        } else {
+            gm().handleLeftClick(player);
+        }
+    }
+
     private static void everyoneVotes(String vote) {
         for (String n : NAMES) {
             ServerPlayer pl = p(n);
             if (pl == null) continue;
-            int slot = VotingManager.VOTE_SETUJU.equals(vote) ? 1 : 0;
             if (!vm().isVotingActive()) return;
-            useSlot(pl, slot);
+            vote(pl, vote);
+        }
+    }
+
+    // ── Misi baterai ──────────────────────────────────────────────────────────
+
+    private static ServerLevel avalon() {
+        return server.getLevel(AvalonDimensions.AVALON);
+    }
+
+    /** Rak gudang ke-{@code i} (0..6). */
+    private static BlockPos sourceRack(int i) {
+        return new BlockPos(-419 - i, 199, -476);
+    }
+
+    private static BlockPos pillarRack(int site) {
+        return AvalonPillars.SITES.get(site).rackPos();
+    }
+
+    private static BlockPos pillar(int site) {
+        return AvalonPillars.SITES.get(site).pillarPos();
+    }
+
+    /** Titik tengah lubang rak di sisi depannya. */
+    private static BlockHitResult rackHit(BlockPos pos, int slot) {
+        Direction facing = avalon().getBlockState(pos).getValue(BatteryRackBlock.FACING);
+        Direction left = facing.getClockWise();
+        double side = (1 - slot % 3) * 5.0 / 16.0;
+        Vec3 at = Vec3.atCenterOf(pos).add(
+                facing.getStepX() * 0.5 + left.getStepX() * side,
+                slot < 3 ? 0.25 : -0.25,
+                facing.getStepZ() * 0.5 + left.getStepZ() * side);
+        return new BlockHitResult(at, facing, pos, false);
+    }
+
+    /** Fake player yang baru reconnect bisa tercatat di dimensi lain: pastikan dia di Avalon dulu. */
+    private static void bringToAvalon(ServerPlayer player, BlockPos near) {
+        if (player.serverLevel() != avalon()) {
+            player.teleportTo(avalon(), near.getX() + 0.5, near.getY() + 1.0, near.getZ() + 0.5, 0f, 0f);
+        }
+    }
+
+    /** Klik kiri lubang rak baterai (ambil / pasang), seperti paket RackClick dari client. */
+    private static void clickRack(ServerPlayer player, BlockPos pos, int slot) {
+        bringToAvalon(player, pos);
+        BlockHitResult hit = rackHit(pos, slot);
+        player.getInventory().selected = 0;
+        BatteryRackBlock.leftClick(player, pos, hit.getDirection(), hit.getLocation());
+    }
+
+    /** Klik kanan lubang rak baterai: tidak memasang / mengambil apa pun. */
+    private static void rightClickRack(ServerPlayer player, BlockPos pos, int slot) {
+        bringToAvalon(player, pos);
+        player.getInventory().selected = 0;
+        player.gameMode.useItemOn(player, avalon(), player.getMainHandItem(), InteractionHand.MAIN_HAND, rackHit(pos, slot));
+    }
+
+    private static boolean holdsBattery(ServerPlayer player) {
+        return player.getInventory().getItem(0).is(ModBlocks.BATTERY.get());
+    }
+
+    private static BatteryRackBlock.Slot slotState(BlockPos rack, int slot) {
+        return avalon().getBlockState(rack).getValue(BatteryRackBlock.SLOTS.get(slot));
+    }
+
+    private static int firstSlot(BlockPos rack, BatteryRackBlock.Slot wanted) {
+        for (int i = 0; i < BatteryRackBlock.SLOT_COUNT; i++) {
+            if (slotState(rack, i) == wanted) return i;
+        }
+        return -1;
+    }
+
+    /** Pilar pertama yang raknya masih terbuka (belum menyala). */
+    private static int openSite() {
+        for (int i = 0; i < AvalonPillars.SITES.size(); i++) {
+            if (BatteryRackBlock.openSlots(avalon().getBlockState(pillarRack(i))) > 0) return i;
+        }
+        return -1;
+    }
+
+    /** Semua anggota tim mengambil baterai dari gudang lalu memasangnya di rak pilar {@code site}. */
+    private static void teamFillsPillar(int site) {
+        List<String> team = gm().getCurrentMissionTeam();
+        for (int i = 0; i < team.size(); i++) {
+            ServerPlayer member = p(team.get(i));
+            if (!holdsBattery(member)) clickRack(member, sourceRack(i), 3);
+            check(holdsBattery(member), team.get(i) + " mengambil baterai dari gudang");
+            clickRack(member, pillarRack(site), firstSlot(pillarRack(site), BatteryRackBlock.Slot.EMPTY));
+            check(!holdsBattery(member), team.get(i) + " memasang baterai di pilar " + site);
         }
     }
 
@@ -301,17 +407,7 @@ public final class AvalonSelfTest {
             check(gm().isCutsceneEnabled(), "cutscene on");
             cmd("avalon roleinfo merlin");
 
-            // Siapkan dunia uji seperti map asli: tanah di bawah tanaman, atap di atas spore blossom
             ServerLevel lvl = p("a").serverLevel();
-            for (int i = 0; i < GameManager.PLANT_LOCATIONS.length; i++) {
-                int[] l = GameManager.PLANT_LOCATIONS[i];
-                BlockPos pos = new BlockPos(l[0], l[1], l[2]);
-                if (GameManager.PLANT_MATERIALS[i] == Blocks.SPORE_BLOSSOM) {
-                    lvl.setBlock(pos.above(), Blocks.STONE.defaultBlockState(), 3);
-                } else {
-                    lvl.setBlock(pos.below(), Blocks.GRASS_BLOCK.defaultBlockState(), 3);
-                }
-            }
             // /queen dipakai admin di dekat arena (chunk queen harus ter-load)
             p("a").teleportTo(lvl, -19.5, 81, -420, 0, 0);
         });
@@ -442,6 +538,22 @@ public final class AvalonSelfTest {
             // /msg diblok
             cmd("execute as b run msg c halo");
             lastKing = gm().getCurrentKingName();
+
+            // Inventory 1 slot: barang di slot lain & slot terpilih selain slot pertama tidak bertahan
+            check(gm().isOneSlot(other), "inventory 1 slot aktif selama game");
+            other.getInventory().setItem(4, new ItemStack(Items.STICK));
+            other.getInventory().selected = 4;
+        });
+        sleep(2);
+        run("cek inventory 1 slot", () -> {
+            ServerPlayer other = null;
+            for (String n : NAMES) if (!n.equals(gm().getCurrentKingName())) { other = p(n); break; }
+            check(other.getInventory().selected == 0, "slot terpilih dipaksa ke slot pertama");
+            check(other.getInventory().getItem(4).isEmpty() && other.getInventory().getItem(0).is(Items.STICK),
+                    "barang di slot lain dipindah ke slot pertama");
+            other.drop(false);
+            check(other.getInventory().getItem(0).is(Items.STICK), "barang tidak bisa di-drop selama game");
+            other.getInventory().clearContent();
         });
 
         // ── Ronde: tim ditolak ────────────────────────────────────────────────
@@ -449,13 +561,16 @@ public final class AvalonSelfTest {
         waitFor("voting dimulai", () -> vm().isVotingActive(), 200);
         run("semua menolak", () -> {
             ServerPlayer a = p("a");
-            check(vm().isVoteItem(a.getInventory().getItem(0)) && vm().isVoteItem(a.getInventory().getItem(1)), "item vote dibagikan");
+            check(vm().isVoteItem(a.getInventory().getItem(0)) && a.getInventory().getItem(1).isEmpty(), "satu item vote dibagikan");
             a.inventoryMenu.clicked(36, 0, ClickType.PICKUP, a);
             check(a.inventoryMenu.getCarried().isEmpty(), "item vote tidak bisa dipindah");
             a.inventoryMenu.clicked(36, 1, ClickType.SWAP, a);
             check(vm().isVoteItem(a.getInventory().getItem(0)), "number key swap diblok");
-            useSlot(a, 1); // setuju dulu
-            useSlot(a, 0); // lalu ganti ke tolak
+            vote(a, VotingManager.VOTE_SETUJU); // klik kanan: setuju dulu
+            check(VotingManager.VOTE_SETUJU.equals(vm().getVote(a)), "klik kanan = setuju");
+            vote(a, VotingManager.VOTE_TOLAK); // klik kiri: ganti ke tolak
+            check(VotingManager.VOTE_TOLAK.equals(vm().getVote(a)), "klik kiri = tolak");
+            check(vm().isVoteItem(a.getInventory().getItem(0)), "item vote tetap ada setelah memilih");
             everyoneVotes(VotingManager.VOTE_TOLAK);
             check(!vm().isVotingActive(), "voting selesai saat semua sudah vote");
         });
@@ -467,36 +582,102 @@ public final class AvalonSelfTest {
         waitFor("voting misi 1", () -> vm().isVotingActive(), 200);
         run("semua setuju", () -> everyoneVotes(VotingManager.VOTE_SETUJU));
         waitFor("misi 1 aktif", () -> gm().isMissionActive(), 200);
-        run("cek misi 1 & panen tanaman", () -> {
+        run("cek misi 1 & pasang baterai", () -> {
             List<String> team = gm().getCurrentMissionTeam();
+            ServerPlayer outsider = null;
             for (String n : NAMES) {
                 ServerPlayer pl = p(n);
                 if (team.contains(n)) {
                     check(pl.gameMode.getGameModeForPlayer() == GameType.SURVIVAL, n + " (tim) survival");
-                    check(gm().isMissionShears(pl.getInventory().getItem(0)), n + " pegang shears misi");
+                    check(pl.getInventory().isEmpty(), n + " mulai dengan tangan kosong");
                     check(!onSeat(pl), n + " turun dari kursi");
                 } else {
                     check(pl.gameMode.getGameModeForPlayer() == GameType.SPECTATOR, n + " (bukan tim) spectator");
+                    outsider = pl;
                 }
             }
+            for (int i = 0; i < AvalonPillars.SITES.size(); i++) {
+                check(BatteryRackBlock.openSlots(avalon().getBlockState(pillarRack(i))) == team.size(),
+                        "rak pilar " + i + " terbuka sebanyak anggota tim");
+                check(!PillarBlock.isLit(avalon(), pillar(i)), "pilar " + i + " masih mati");
+            }
+            check(BatteryRackBlock.batteries(avalon().getBlockState(sourceRack(0))) == 6, "rak gudang penuh");
+
             ServerPlayer member = p(team.get(0));
-            // Shears tidak bisa di-drop
-            member.getInventory().selected = 0;
+            ServerPlayer mate = p(team.get(1));
+
+            // Bukan anggota tim tidak bisa mengambil baterai
+            outsider.setGameMode(GameType.SURVIVAL);
+            clickRack(outsider, sourceRack(6), 0);
+            check(!holdsBattery(outsider), "bukan anggota tim tidak bisa mengambil baterai");
+            outsider.setGameMode(GameType.SPECTATOR);
+
+            // Satu baterai per orang, tidak bisa di-drop, tidak bisa dikembalikan ke gudang
+            clickRack(member, sourceRack(0), 0);
+            check(holdsBattery(member), "anggota tim mengambil baterai");
+            check(slotState(sourceRack(0), 0) == BatteryRackBlock.Slot.EMPTY, "lubang gudang jadi kosong");
             member.drop(false);
-            check(gm().isMissionShears(member.getInventory().getItem(0)), "shears misi tidak bisa di-drop");
-            // Blok lain tidak bisa dihancurkan
+            check(holdsBattery(member), "baterai tidak bisa di-drop");
+            clickRack(member, sourceRack(0), 0);
+            check(holdsBattery(member), "baterai tidak bisa dikembalikan ke gudang");
+
+            // Kubu baik tidak bisa masuk mode sabotase
+            useSlot(member, 0);
+            check(!gm().getBatteryMission().isSabotaging(member), "kubu baik tidak punya mode sabotase");
+
+            // Salah pilar: pasang di pilar 0, ambil lagi, pindah ke pilar 1
+            int slot = firstSlot(pillarRack(0), BatteryRackBlock.Slot.EMPTY);
+            rightClickRack(member, pillarRack(0), slot);
+            check(holdsBattery(member) && slotState(pillarRack(0), slot) == BatteryRackBlock.Slot.EMPTY,
+                    "klik kanan tidak memasang baterai");
+            clickRack(member, pillarRack(0), slot);
+            check(!holdsBattery(member) && slotState(pillarRack(0), slot) == BatteryRackBlock.Slot.BATTERY,
+                    "baterai terpasang di rak pilar 0");
+            clickRack(member, sourceRack(1), 0);
+            check(!holdsBattery(member), "tidak bisa mengambil baterai kedua dari gudang");
+            clickRack(mate, pillarRack(0), slot);
+            check(!holdsBattery(mate), "baterai orang lain tidak bisa diambil");
+            rightClickRack(member, pillarRack(0), slot);
+            check(!holdsBattery(member), "klik kanan tidak mengambil baterai");
+            clickRack(member, pillarRack(0), slot);
+            check(holdsBattery(member), "baterai sendiri bisa diambil lagi dari rak pilar");
+            check(gm().isMissionActive(), "misi belum selesai");
+
+            // Blok tidak bisa dihancurkan
             BlockPos other = member.blockPosition().below();
+            BlockState before = member.serverLevel().getBlockState(other);
             member.serverLevel().setBlock(other, Blocks.STONE.defaultBlockState(), 3);
             member.gameMode.destroyBlock(other);
-            check(member.serverLevel().getBlockState(other).is(Blocks.STONE), "blok non-misi tidak bisa dihancurkan");
-            int[] loc = GameManager.PLANT_LOCATIONS[0];
-            BlockPos plant = new BlockPos(loc[0], loc[1], loc[2]);
-            check(member.serverLevel().getBlockState(plant).is(Blocks.PITCHER_PLANT), "pitcher plant terpasang");
-            member.gameMode.destroyBlock(plant);
-            check(member.serverLevel().getBlockState(plant).isAir(), "pitcher plant dipanen");
-            check(findHotbarSlot(member, s -> s.is(Items.PITCHER_PLANT)) >= 0, "item pitcher plant masuk inventory");
+            check(member.serverLevel().getBlockState(other).is(Blocks.STONE), "blok tidak bisa dihancurkan");
+            member.serverLevel().setBlock(other, before, 3);
+
+            teamFillsPillar(1);
+            check(!gm().getBatteryMission().isActive(), "rak pilar 1 penuh: misi menunggu hasil");
+            clickRack(member, pillarRack(1), firstSlot(pillarRack(1), BatteryRackBlock.Slot.BATTERY));
+            check(!holdsBattery(member), "baterai tidak bisa diambil setelah rak penuh");
+
+            // Cutscene pilar: semua player diparkir di atas pilar, tak terlihat & terkunci
+            for (String n : NAMES) {
+                ServerPlayer pl = p(n);
+                check(pl.isInvisible() && gm().isMovementLocked(pl) && pl.serverLevel() == avalon()
+                        && pl.getY() > pillar(1).getY() + PillarBlock.ORB_HEIGHT, n + " diparkir untuk cutscene pilar");
+            }
+            check(!PillarBlock.isLit(avalon(), pillar(1)), "pilar belum menyala saat cutscene baru mulai");
         });
-        waitFor("tanaman 0 tercatat", () -> gm().getCompletedPlants().contains(0), 40);
+        waitFor("pilar 1 mulai menyala", () -> PillarBlock.isLit(avalon(), pillar(1)), 80);
+        waitFor("misi 1 sukses", () -> !gm().isMissionActive(), 320);
+        run("cek pilar setelah misi 1", () -> {
+            check(PillarBlock.isLit(avalon(), pillar(1)), "pilar 1 tetap menyala");
+            for (String n : NAMES) {
+                ServerPlayer pl = p(n);
+                check(!pl.isInvisible() && !pl.getAbilities().flying, n + " kembali normal setelah cutscene");
+            }
+            for (int i = 0; i < AvalonPillars.SITES.size(); i++) {
+                BlockState rack = avalon().getBlockState(pillarRack(i));
+                check(BatteryRackBlock.openSlots(rack) == 0 && BatteryRackBlock.batteries(rack) == 0,
+                        "rak pilar " + i + " kosong & tertutup setelah misi");
+            }
+        });
         waitFor("diskusi setelah misi 1", () -> gm().isDiscussionActive(), 600);
 
         // ── Offline / online saat diskusi ─────────────────────────────────────
@@ -531,18 +712,27 @@ public final class AvalonSelfTest {
             String evil = null;
             for (String n : gm().getCurrentMissionTeam()) if (gm().getRole(p(n)).isEvil()) evil = n;
             ServerPlayer saboteur = p(evil);
-            check(gm().isSabotaseShears(saboteur.getInventory().getItem(0)), "kubu jahat pegang shears Sabotase");
+            check(!PillarBlock.isLit(avalon(), pillar(0)) && PillarBlock.isLit(avalon(), pillar(1)),
+                    "hanya pilar 1 yang menyala");
+            check(BatteryRackBlock.openSlots(avalon().getBlockState(pillarRack(1))) == 0, "rak pilar yang sudah menyala tetap tertutup");
+            check(BatteryRackBlock.batteries(avalon().getBlockState(sourceRack(0))) == 6, "gudang diisi penuh lagi");
+
+            int index = gm().getCurrentMissionTeam().indexOf(evil);
+            clickRack(saboteur, sourceRack(index), 3);
+            check(holdsBattery(saboteur), "kubu jahat mengambil baterai");
             useSlot(saboteur, 0);
-            int[] loc = GameManager.PLANT_LOCATIONS[1];
-            BlockPos plant = new BlockPos(loc[0], loc[1], loc[2]);
-            check(saboteur.serverLevel().getBlockState(plant).is(Blocks.DEAD_BUSH), "tanaman jadi dead bush");
-            int[] loc2 = GameManager.PLANT_LOCATIONS[2];
-            check(saboteur.serverLevel().getBlockState(new BlockPos(loc2[0], loc2[1], loc2[2])).is(Blocks.HANGING_ROOTS),
-                    "spore blossom jadi hanging roots");
+            check(gm().getBatteryMission().isSabotaging(saboteur), "klik kanan sambil pegang baterai = mode sabotase");
             useSlot(saboteur, 0);
-            saboteur.teleportTo(saboteur.serverLevel(), loc[0] + 0.5, loc[1] + 1, loc[2] + 3.5, 0, 0);
+            check(gm().getBatteryMission().isSabotaging(saboteur), "klik beruntun tidak membolak-balik mode");
+
+            teamFillsPillar(0);
+            check(!gm().getBatteryMission().isActive() && gm().isMissionActive(), "rak pilar 0 penuh: cutscene berjalan");
         });
-        waitFor("countdown sabotase", () -> !gm().isMissionActive(), 100);
+        waitFor("pilar 0 meluap", () -> avalon().getBlockState(pillar(0)).getValue(PillarBlock.OVERLOAD), 80);
+        waitFor("pilar pecah & misi gagal", () -> !gm().isMissionActive(), 320);
+        waitFor("pilar 0 mati lagi", () -> !avalon().getBlockState(pillar(0)).getValue(PillarBlock.OVERLOAD), 100);
+        run("cek pilar setelah sabotase", () ->
+                check(!PillarBlock.isLit(avalon(), pillar(0)), "pilar yang disabotase tidak menyala"));
         waitFor("diskusi setelah sabotase", () -> gm().isDiscussionActive(), 600);
         run("skip diskusi (gagal)", AvalonSelfTest::everyoneSkips);
         waitFor("raja berganti setelah misi 2", () -> !gm().isDiscussionActive() && gm().getEvilMissionFails() == 1
@@ -550,23 +740,22 @@ public final class AvalonSelfTest {
 
         // ── Misi 3 & 4: sukses ────────────────────────────────────────────────
         for (int m = 0; m < 2; m++) {
-            final int plantIndex = m + 1;
-            run("misi sukses (tanaman " + plantIndex + ")", () -> {
+            final int round = m + 3;
+            final int[] site = new int[1];
+            run("misi " + round + ": tim baik", () -> {
                 lastKing = gm().getCurrentKingName();
                 kingPicksTeam(goodTeam());
             });
-            waitFor("voting (tanaman " + plantIndex + ")", () -> vm().isVotingActive(), 200);
-            run("setuju (tanaman " + plantIndex + ")", () -> everyoneVotes(VotingManager.VOTE_SETUJU));
-            waitFor("misi aktif (tanaman " + plantIndex + ")", () -> gm().isMissionActive(), 200);
-            run("panen tanaman " + plantIndex, () -> {
-                ServerPlayer member = p(gm().getCurrentMissionTeam().get(0));
-                int[] loc = GameManager.PLANT_LOCATIONS[plantIndex];
-                BlockPos plant = new BlockPos(loc[0], loc[1], loc[2]);
-                check(member.serverLevel().getBlockState(plant).is(GameManager.PLANT_MATERIALS[plantIndex]),
-                        "tanaman " + plantIndex + " dipasang ulang");
-                member.gameMode.destroyBlock(plant);
+            waitFor("voting misi " + round, () -> vm().isVotingActive(), 200);
+            run("setuju misi " + round, () -> everyoneVotes(VotingManager.VOTE_SETUJU));
+            waitFor("misi " + round + " aktif", () -> gm().isMissionActive(), 200);
+            run("pasang baterai misi " + round, () -> {
+                site[0] = openSite();
+                check(site[0] >= 0 && site[0] != 1, "pilar yang belum menyala dibuka lagi (pilar " + site[0] + ")");
+                teamFillsPillar(site[0]);
             });
-            waitFor("tanaman " + plantIndex + " tercatat", () -> gm().getCompletedPlants().contains(plantIndex), 40);
+            waitFor("misi " + round + " sukses", () -> !gm().isMissionActive(), 320);
+            run("cek pilar misi " + round, () -> check(PillarBlock.isLit(avalon(), pillar(site[0])), "pilar " + site[0] + " menyala"));
             if (m == 0) {
                 waitFor("diskusi", () -> gm().isDiscussionActive(), 600);
                 run("skip diskusi", AvalonSelfTest::everyoneSkips);
@@ -596,7 +785,12 @@ public final class AvalonSelfTest {
             ServerPlayer merlin = p(nameWithRole(Role.MERLIN));
             ItemStack bow = assassin.getInventory().getItem(0);
             check(gm().isAssassinBowItem(bow) && bow.getDamageValue() == 383, "busur assassin durability 1");
-            check(assassin.getInventory().getItem(1).is(Items.ARROW), "assassin punya 1 panah");
+            check(assassin.getInventory().getItem(1).isEmpty()
+                    && EnchantmentHelper.getItemEnchantmentLevel(Enchantments.INFINITY_ARROWS, bow) > 0,
+                    "busur Infinity tanpa item panah");
+            useSlot(assassin, 0);
+            check(assassin.isUsingItem(), "busur bisa ditarik tanpa panah");
+            assassin.stopUsingItem();
 
             ServerLevel level = assassin.serverLevel();
             Arrow arrow = new Arrow(level, assassin);
@@ -616,6 +810,10 @@ public final class AvalonSelfTest {
             int seats = 0;
             for (Entity e : level.getAllEntities()) if (e.getTags().contains("avalon_seat")) seats++;
             check(seats == 0, "semua kursi dihapus");
+            for (int i = 0; i < AvalonPillars.SITES.size(); i++) {
+                check(!PillarBlock.isLit(avalon(), pillar(i)), "pilar " + i + " dimatikan setelah game");
+            }
+            check(!gm().isOneSlot(p("a")), "inventory 1 slot berakhir bersama game");
             check(server.isPvpAllowed(), "PvP dinyalakan lagi");
             for (String n : NAMES) {
                 ServerPlayer pl = p(n);

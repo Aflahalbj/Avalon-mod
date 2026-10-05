@@ -1,7 +1,6 @@
 package id.avalon.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import id.avalon.block.PillarBlock;
 import id.avalon.block.PillarBlockEntity;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
@@ -18,7 +17,7 @@ public class PillarRenderer implements BlockEntityRenderer<PillarBlockEntity> {
     @Override
     public void render(PillarBlockEntity pillar, float partialTick, PoseStack pose, MultiBufferSource buffer,
                        int packedLight, int packedOverlay) {
-        PillarOrbRenderer.track(pillar.getBlockPos(), pillar.getBlockState().getValue(PillarBlock.LIT));
+        PillarOrbRenderer.track(pillar, partialTick);
     }
 
     /** Bola tetap digambar walau block-nya sendiri di luar layar. */

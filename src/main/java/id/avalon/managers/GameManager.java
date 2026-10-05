@@ -3,6 +3,7 @@ package id.avalon.managers;
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
 import id.avalon.AvalonMod;
+import id.avalon.block.PillarBlock;
 import id.avalon.core.AvalonDimensions;
 import id.avalon.core.AvalonItems;
 import id.avalon.core.AvalonLog;
@@ -13,6 +14,7 @@ import id.avalon.core.Task;
 import id.avalon.core.Txt;
 import id.avalon.cutscene.PortalCutscene;
 import id.avalon.cutscene.KingRouletteTimeline;
+import id.avalon.cutscene.PillarTimeline;
 import id.avalon.cutscene.PortalTimeline;
 import id.avalon.cutscene.RoleShuffleTimeline;
 import id.avalon.entity.MannequinEntity;
@@ -20,6 +22,8 @@ import id.avalon.entity.ModEntities;
 import id.avalon.gui.TeamSelectionGUI;
 import id.avalon.models.Role;
 import id.avalon.network.AvalonNetwork;
+import id.avalon.world.AvalonPillars;
+import id.avalon.world.AvalonPortal;
 import id.avalon.world.AvalonSeats;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -47,6 +51,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
@@ -112,7 +117,6 @@ public class GameManager {
     /** Misi yang sedang berjalan (1-5). */
     private int currentMission = 1;
     private int currentRound = 1;
-    private final Set<Integer> completedPlants = new HashSet<>();
     private int evilMissionFails = 0;
     /** Session pemilihan tim per Raja (UUID raja -> list nama yang sudah dipilih). */
     private final Map<UUID, List<String>> teamSelectionSessions = new HashMap<>();
@@ -126,15 +130,15 @@ public class GameManager {
     private boolean missionActive = false;
     /** Tim yang sedang menjalankan misi (nama player). */
     private List<String> currentMissionTeam = new ArrayList<>();
-    /** Koordinat blok tanaman misi saat ini (untuk cek proximity sabotage). */
-    private BlockPos missionPlantLocation = null;
+    /** Rak pilar sudah penuh dan animasinya sedang berjalan: hasil misi tinggal diumumkan. */
+    private boolean missionResolving = false;
+    /** Aturan & keadaan misi baterai (gudang, rak pilar, mode sabotase). */
+    private final BatteryMission batteryMission = new BatteryMission(this);
     /** Task proximity checker (player mendekat tanaman → trigger end). */
     private Task proximityTask;
     /** Apakah misi ini sudah disabotase. */
     private boolean missionSabotaged = false;
     private int sabotageCount = 0;
-    /** Index tanaman di PLANT_LOCATIONS yang terakhir berhasil dipanen (untuk cutscene). */
-    private int lastCollectedPlantIndex = 0;
     private final Set<UUID> sabotagedPlayers = new HashSet<>();
     /** Task countdown end-mission. */
     private Task endMissionCountdownTask;
@@ -185,7 +189,6 @@ public class GameManager {
     // ── Item tag keys ─────────────────────────────────────────────────────────
     public static final String KEY_DISCUSSION_SKIP    = "discussion_skip";
     public static final String KEY_ASSASSINATION_SKIP = "assassination_skip";
-    public static final String KEY_MISSION_SHEARS     = "mission_shears";
 
     // ── Koordinat ────────────────────────────────────────────────────────────
 
@@ -220,19 +223,6 @@ public class GameManager {
     public final int BASE_X = -20;
     public final int BASE_Y = 80;
     public final int BASE_Z = -383;
-
-    // ── Koordinat & block tanaman misi ───────────────────────────────────────
-    // Index 0: Pitcher Plant (original), 1: Torchflower, 2: Spore Blossom
-    public static final int[][] PLANT_LOCATIONS = {
-        {-45, 71, -177},   // Pitcher Plant
-        {69, 11, -275},  // Torchflower
-        {0, 166, -286},   // Spore Blossom
-    };
-    public static final Block[] PLANT_MATERIALS = {
-        Blocks.PITCHER_PLANT,
-        Blocks.TORCHFLOWER,
-        Blocks.SPORE_BLOSSOM,
-    };
 
     // ── Constructor ──────────────────────────────────────────────────────────
 
@@ -300,6 +290,7 @@ public class GameManager {
 
             // Movement lock (fallback server-side)
             enforceMovementLock(p);
+            enforceOneSlot(p);
 
             // Green wool step height
             AttributeInstance step = p.getAttribute(ForgeMod.STEP_HEIGHT_ADDITION.get());
@@ -325,6 +316,30 @@ public class GameManager {
 
             // Plugin: STEP_HEIGHT 10.0 dekat green wool, 0.6 normal. Forge: tambahan dari 0.6.
             step.setBaseValue(nearGreenWool ? 10.0 - 0.6 : 0.0);
+        }
+    }
+
+    // ── Inventory 1 slot ──────────────────────────────────────────────────────
+
+    /** Selama game, inventory player terdaftar hanya slot hotbar pertama. */
+    public boolean isOneSlot(Player player) {
+        return gameRunning && registeredPlayers.contains(player.getGameProfile().getName());
+    }
+
+    private void syncOneSlot(ServerPlayer player) {
+        AvalonNetwork.sendTo(player, new AvalonNetwork.OneSlot(isOneSlot(player)));
+    }
+
+    private void enforceOneSlot(ServerPlayer p) {
+        if (!isOneSlot(p)) return;
+        Inventory inv = p.getInventory();
+        if (inv.selected != 0) setHeldItemSlot(p, 0);
+        // Barang yang nyasar ke slot lain: pindah ke slot 0 kalau kosong, selain itu dibuang
+        for (int i = 1; i < inv.getContainerSize(); i++) {
+            ItemStack stack = inv.getItem(i);
+            if (stack.isEmpty()) continue;
+            inv.setItem(i, ItemStack.EMPTY);
+            if (inv.getItem(0).isEmpty()) inv.setItem(0, stack);
         }
     }
 
@@ -376,6 +391,7 @@ public class GameManager {
         } else {
             AvalonNetwork.sendTo(player, new AvalonNetwork.MovementLock(false));
         }
+        syncOneSlot(player);
     }
 
     // ===== REGISTER =====
@@ -417,7 +433,6 @@ public class GameManager {
     public int getCurrentRound()                    { return currentRound; }
     public int getEvilMissionFails()                { return evilMissionFails; }
     public List<String> getCurrentMissionTeam()     { return Collections.unmodifiableList(currentMissionTeam); }
-    public Set<Integer> getCompletedPlants()        { return Collections.unmodifiableSet(completedPlants); }
     public int getOfflineMannequinCount()           { return offlineMannequins.size(); }
 
     // ===== ROLE MANAGEMENT =====
@@ -526,7 +541,8 @@ public class GameManager {
 
     private void sendCrownTo(ServerPlayer p, boolean animate) {
         String kingName = getCurrentKingName();
-        if (kingName == null) {
+        // Selama misi (termasuk cutscene pilarnya) mahkota disembunyikan
+        if (kingName == null || missionActive) {
             AvalonNetwork.sendTo(p, AvalonNetwork.Crown.NONE);
             return;
         }
@@ -599,7 +615,7 @@ public class GameManager {
         );
         AvalonItems.setTag(book, PDC_KEY_TEAM_BOOK, "true");
 
-        king.getInventory().add(book);
+        king.getInventory().setItem(0, book);
     }
 
     /** Hapus item Buku Pemilihan Tim dari inventory Raja. */
@@ -1302,6 +1318,7 @@ public class GameManager {
             p.getInventory().clearContent();
         }
         gameRunning = true;
+        for (ServerPlayer p : activePlayers) syncOneSlot(p);
         ServerLevel world = getGameWorld();
 
         world.getServer().setPvpAllowed(false);
@@ -1487,7 +1504,7 @@ public class GameManager {
         broadcast(Txt.t("═══════════════════════", ChatFormatting.GOLD));
         broadcast(Txt.blank());
         broadcast(Txt.t("  🤫 GAME DIMULAI 🤫", ChatFormatting.GREEN, ChatFormatting.BOLD));
-        broadcast(Txt.t("  Jaga & bantu merlin mendapatkan 3 tanaman untuk menang!", ChatFormatting.YELLOW));
+        broadcast(Txt.t("  Jaga & bantu merlin menyalakan 3 pilar untuk menang!", ChatFormatting.YELLOW));
         broadcast(Txt.t("  Jangan biarkan kubu jahat menggagalkan misi!", ChatFormatting.RED));
         broadcast(Txt.t("  Plugin By ", ChatFormatting.GREEN).append(Txt.t("Aflahal", ChatFormatting.WHITE, ChatFormatting.BOLD)));
         broadcast(Txt.blank());
@@ -1495,7 +1512,7 @@ public class GameManager {
 
         world.setBlock(new BlockPos(BASE_X, BASE_Y, BASE_Z), Blocks.WATER_CAULDRON.defaultBlockState(), 3);
         world.setBlock(new BlockPos(BASE_X, BASE_Y - 1, BASE_Z), Blocks.CAMPFIRE.defaultBlockState(), 3);
-        placeAllMissionPlants(world);
+        batteryMission.reset(server());
         delayedTasks.add(
             Scheduler.later(100L, () -> {
                 if (!gameRunning) return;
@@ -1507,83 +1524,9 @@ public class GameManager {
 
     // ===== MISSION PHASE =====
 
-    /**
-     * Mendapatkan index PLANT_LOCATIONS/PLANT_MATERIALS berdasarkan nomor misi.
-     * Cycle: misi 1→0 (Pitcher), 2→1 (Torchflower), 3→2 (Spore Blossom), ulang.
-     */
-    private int getMissionPlantIndex(int mission) {
-        return (mission - 1) % PLANT_LOCATIONS.length;
-    }
-
-    /**
-     * Buat item Shears dengan nama sesuai kubu.
-     * Rule 3: Kubu Baik = "Gunting", Kubu Jahat = "Sabotase"
-     */
-    private ItemStack makeShears(ServerPlayer player) {
-        Role role = getRole(player);
-        boolean isEvil = role != null && role.isEvil();
-        ItemStack shears;
-        if (isEvil) {
-            shears = AvalonItems.named(Items.SHEARS, Txt.t("Sabotase", ChatFormatting.RED, ChatFormatting.BOLD), null);
-            AvalonItems.setTag(shears, KEY_MISSION_SHEARS, "sabotase");
-        } else {
-            shears = AvalonItems.named(Items.SHEARS, Txt.t("Gunting", ChatFormatting.GREEN, ChatFormatting.BOLD), null);
-            AvalonItems.setTag(shears, KEY_MISSION_SHEARS, "gunting");
-        }
-        return shears;
-    }
-
-    /**
-     * Cek apakah item adalah shears misi (Gunting / Sabotase).
-     */
-    public boolean isMissionShears(ItemStack item) {
-        if (item == null || item.isEmpty() || !item.is(Items.SHEARS)) return false;
-        if (AvalonItems.hasTag(item, KEY_MISSION_SHEARS)) return true;
-        if (!item.hasCustomHoverName()) return false;
-        // Cek displayName "Gunting" atau "Sabotase"
-        String plain = item.getHoverName().getString();
-        return plain.equals("Gunting") || plain.equals("Sabotase");
-    }
-
-    public boolean isMissionPlant(ItemStack item) {
-        if (item == null || item.isEmpty()) return false;
-        return item.is(Items.PITCHER_PLANT)
-                || item.is(Items.TORCHFLOWER)
-                || item.is(Items.SPORE_BLOSSOM);
-    }
-
     /** Cek apakah player termasuk tim misi yang sedang berjalan. */
     public boolean isInMissionTeam(Player player) {
         return currentMissionTeam.contains(player.getGameProfile().getName());
-    }
-
-    /** Cari index tanaman aktif (non-AIR) terdekat dari player. Return -1 jika tidak ada. */
-    private int getNearestActivePlantIndex(ServerPlayer player, ServerLevel world) {
-        int nearestIndex = -1;
-        double nearestDist = Double.MAX_VALUE;
-        for (int i = 0; i < PLANT_LOCATIONS.length; i++) {
-            int[] loc = PLANT_LOCATIONS[i];
-            BlockState b = world.getBlockState(new BlockPos(loc[0], loc[1], loc[2]));
-            if (!b.is(Blocks.AIR) && !b.is(Blocks.CAVE_AIR)) {
-                double dist = player.position().distanceToSqr(loc[0] + 0.5, loc[1], loc[2] + 0.5);
-                if (dist < nearestDist) {
-                    nearestDist = dist;
-                    nearestIndex = i;
-                }
-            }
-        }
-        return nearestIndex;
-    }
-
-    /**
-     * Cek apakah item adalah Sabotase shears.
-     */
-    public boolean isSabotaseShears(ItemStack item) {
-        if (item == null || item.isEmpty() || !item.is(Items.SHEARS)) return false;
-        String tag = AvalonItems.getTag(item, KEY_MISSION_SHEARS);
-        if (tag != null) return tag.equals("sabotase");
-        if (!item.hasCustomHoverName()) return false;
-        return item.getHoverName().getString().equals("Sabotase");
     }
 
     /**
@@ -1591,8 +1534,8 @@ public class GameManager {
      * Implementasi lengkap fase misi.
      *
      * Rule 2: Player tak terpilih → Unseat + Spectator.
-     *         Player terpilih → Survival + Slowness 1 + Shears di hotbar 1.
-     * Rule 3: Item per misi + rename Shears.
+     *         Player terpilih → Survival + Slowness 1, tangan kosong.
+     * Rule 3: Misi baterai (lihat BatteryMission).
      * Rule 4: Sabotage mechanic untuk kubu jahat.
      * Rule 5: End mission & teleport.
      */
@@ -1604,12 +1547,13 @@ public class GameManager {
         sabotagedPlayers.clear();
         currentMissionTeam = new ArrayList<>(team);
 
+        missionResolving = false;
+        sendCrown(false);
+
         ServerLevel world = getGameWorld();
 
-        // ── Re-taruh semua tanaman (restore yang sudah habis di misi sebelumnya) ─
-        placeAllMissionPlants(world);
-        // missionPlantLocation tidak dipakai lagi (multi-location), set null
-        missionPlantLocation = null;
+        // ── Gudang diisi penuh, rak tiap pilar dibuka sebanyak anggota tim ────
+        batteryMission.start(server(), team.size());
 
         for (String playerName : getRegisteredPlayers()) {
             ServerPlayer p = getPlayerExact(playerName);
@@ -1631,22 +1575,20 @@ public class GameManager {
                 // Slowness 1 (amplifier=0 = level 1), tanpa efek/ikon
                 p.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, MobEffectInstance.INFINITE_DURATION, 0, false, false, false));
 
-                // Hanya shears di hotbar — tanaman ada di dunia, bukan inventory
+                // Tangan kosong: baterainya diambil sendiri dari gudang
                 p.getInventory().clearContent();
-                ItemStack shears = makeShears(p);
-                p.getInventory().setItem(0, shears);
                 setHeldItemSlot(p, 0);
 
                 Role role = getRole(p);
                 boolean isEvil = role != null && role.isEvil();
 
                 p.sendSystemMessage(Txt.blank());
-                p.sendSystemMessage(Txt.t("  🌿 Misi ke-" + currentRound + " dimulai!", ChatFormatting.GREEN, ChatFormatting.BOLD));
+                p.sendSystemMessage(Txt.t("  🔋 Misi ke-" + currentRound + " dimulai!", ChatFormatting.GREEN, ChatFormatting.BOLD));
                 p.sendSystemMessage(Txt.t("  Anggota tim: ", ChatFormatting.WHITE).append(Txt.t(String.join(", ", team), ChatFormatting.GREEN, ChatFormatting.BOLD)));
+                p.sendSystemMessage(Txt.t("  Ambil 1 baterai di gudang, lalu pasang di rak salah satu pilar.", ChatFormatting.YELLOW));
+                p.sendSystemMessage(Txt.t("  Semua anggota tim harus memasang di pilar yang sama.", ChatFormatting.YELLOW));
                 if (isEvil) {
-                    p.sendSystemMessage(Txt.t("  Gunakan Sabotase (klik kanan) untuk mengganti tanaman jadi dead bush!", ChatFormatting.RED));
-                } else {
-                    p.sendSystemMessage(Txt.t("  Hancurkan tanaman di lokasi misi dengan Gunting untuk menyelesaikan misi.", ChatFormatting.YELLOW));
+                    p.sendSystemMessage(Txt.t("  Klik kanan sambil memegang baterai untuk ganti ke mode sabotase.", ChatFormatting.RED));
                 }
                 p.sendSystemMessage(Txt.blank());
             }
@@ -1657,55 +1599,12 @@ public class GameManager {
 
         // ── Sabotage mechanic (actionbar) ────────────────────────────────────
         startSabotageMechanic(team, world);
-
-        // ── Block checker: pantau block di koor misi ─────────────────────────
-        startMissionBlockChecker(team, world);
     }
 
     /** Setara PlayerInventory#setHeldItemSlot. */
     private void setHeldItemSlot(ServerPlayer p, int slot) {
         p.getInventory().selected = slot;
         p.connection.send(new ClientboundSetCarriedItemPacket(slot));
-    }
-
-    /**
-     * Taruh semua tanaman misi di koordinat masing-masing.
-     * Dipanggil di awal game dan di awal setiap misi (re-place yang hilang).
-     */
-    private void placeAllMissionPlants(ServerLevel world) {
-        for (int i = 0; i < PLANT_LOCATIONS.length; i++) {
-            if (completedPlants.contains(i)) {
-                continue;
-            }
-            int x = PLANT_LOCATIONS[i][0];
-            int y = PLANT_LOCATIONS[i][1];
-            int z = PLANT_LOCATIONS[i][2];
-            Block mat = PLANT_MATERIALS[i];
-
-            if (mat == Blocks.PITCHER_PLANT) {
-                world.setBlock(new BlockPos(x, y, z),
-                    Blocks.PITCHER_PLANT.defaultBlockState().setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER), 3);
-                world.setBlock(new BlockPos(x, y + 1, z),
-                    Blocks.PITCHER_PLANT.defaultBlockState().setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER), 3);
-            } else {
-                world.setBlock(new BlockPos(x, y, z), mat.defaultBlockState(), 3);
-            }
-        }
-    }
-
-    /**
-     * Hapus semua tanaman misi dari dunia (dipakai saat cleanup).
-     */
-    private void clearAllMissionPlants(ServerLevel world) {
-        for (int i = 0; i < PLANT_LOCATIONS.length; i++) {
-            int x = PLANT_LOCATIONS[i][0];
-            int y = PLANT_LOCATIONS[i][1];
-            int z = PLANT_LOCATIONS[i][2];
-            world.setBlock(new BlockPos(x, y, z), Blocks.AIR.defaultBlockState(), 3);
-            if (PLANT_MATERIALS[i] == Blocks.PITCHER_PLANT) {
-                world.setBlock(new BlockPos(x, y + 1, z), Blocks.AIR.defaultBlockState(), 3);
-            }
-        }
     }
 
     /**
@@ -1764,8 +1663,8 @@ public class GameManager {
 
     /**
      * Rule 4: Kubu Jahat bisa sabotase selama misi.
-     * - Actionbar jahat: "Klik kanan untuk sabotase | Biarkan saja untuk menyamar"
-     * - Trigger sabotase: lihat MissionListener (klik kanan shears "Sabotase")
+     * - Actionbar jahat: mode baterainya (normal / sabotase)
+     * - Ganti mode: lihat MissionListener (klik kanan sambil memegang baterai)
      */
     private void startSabotageMechanic(List<String> team, ServerLevel world) {
         stopSabotageMechanic();
@@ -1782,22 +1681,9 @@ public class GameManager {
                     if (p == null) continue;
                     Role role = getRole(p);
                     if (role != null && role.isEvil()) {
-                        // Rule 4: Actionbar Jahat
-                        if (missionSabotaged) {
-
-                            Fx.actionBar(p,
-                                Txt.t("☠ Kamu telah sabotase misi ini", ChatFormatting.RED, ChatFormatting.BOLD)
-                            );
-
-                        } else {
-
-                            Fx.actionBar(p,
-                                Txt.t("🗡 Klik kanan untuk sabotase", ChatFormatting.RED)
-                                    .append(Txt.t(" | ", ChatFormatting.GRAY))
-                                    .append(Txt.t("Biarkan saja untuk menyamar", ChatFormatting.YELLOW))
-                            );
-
-                        }
+                        // Rule 4: mode baterainya sekarang (hanya terlihat oleh dia sendiri)
+                        Component line = batteryMission.isActive() ? batteryMission.modeLine(p) : null;
+                        if (line != null) Fx.actionBar(p, line);
                     }
                 }
             }
@@ -1815,76 +1701,149 @@ public class GameManager {
         }
     }
 
-    /**
-     * Dipanggil dari MissionListener saat player klik kanan item "Sabotase".
-     * Ubah tanaman jadi dead bush, lalu block checker yang trigger countdown.
-     */
-    public void triggerSabotage(ServerPlayer player) {
-        if (!missionActive) return;
-        Role role = getRole(player);
-        if (role == null || !role.isEvil()) return;
-        if (sabotagedPlayers.contains(player.getUUID())) {
-            player.sendSystemMessage(
-                Txt.t("Kamu sudah melakukan sabotase pada misi ini.", ChatFormatting.RED)
-            );
-            return;
-        }
-        sabotagedPlayers.add(player.getUUID());
-        sabotageCount++;
+    // ── Misi baterai ──────────────────────────────────────────────────────────
 
-        int playerCount = registeredPlayers.size();
-        boolean needsTwoFails =
-            TeamSelectionGUI.requiresTwoFails(playerCount, currentRound);
-
-        if (needsTwoFails && sabotageCount < 2) {
-            player.sendSystemMessage(
-                Txt.t("☠ Sabotase pertama berhasil! Dibutuhkan 1 sabotase lagi.", ChatFormatting.RED)
-            );
-            return;
-        }
-        if (!needsTwoFails && sabotageCount < 1) return;
-
-        missionSabotaged = true;
-
-        // Ganti semua tanaman yang belum dipanen jadi dead bush / hanging roots
-        ServerLevel world = getGameWorld();
-        if (world != null) {
-            int idx = getNearestActivePlantIndex(player, world);
-            if (idx >= 0) {
-                for (int i = 0; i < PLANT_LOCATIONS.length; i++) {
-
-                    if (completedPlants.contains(i)) {
-                        continue;
-                    }
-
-                    int[] plantLoc = PLANT_LOCATIONS[i];
-                    BlockPos pos = new BlockPos(plantLoc[0], plantLoc[1], plantLoc[2]);
-
-                    if (PLANT_MATERIALS[i] == Blocks.SPORE_BLOSSOM) {
-
-                        world.setBlock(pos, Blocks.HANGING_ROOTS.defaultBlockState(), 3);
-
-                    } else {
-
-                        world.setBlock(pos, Blocks.DEAD_BUSH.defaultBlockState(), 3);
-
-                    }
-                }
-            }
-        }
-
-        player.sendSystemMessage(Txt.blank());
-        player.sendSystemMessage(Txt.t("  ☠ Kamu berhasil melakukan sabotase!", ChatFormatting.RED, ChatFormatting.BOLD));
-        player.sendSystemMessage(Txt.blank());
+    public BatteryMission getBatteryMission() {
+        return batteryMission;
     }
 
     /**
-     * Dipanggil oleh block checker saat sabotase terdeteksi dan ada player dalam 10 blok.
-     * Tampilkan pesan + countdown 20 detik → teleport semua player ke seat.
+     * Rak salah satu pilar sudah penuh: mainkan cutscene pilarnya untuk semua player, lalu langsung
+     * kembali ke kursi. Tiang cahayanya naik sama persis untuk sukses maupun gagal, jadi hasilnya
+     * baru ketahuan saat tiang sampai di puncak.
+     *
+     * @param site      indeks pilar di {@link AvalonPillars#SITES}
+     * @param sabotages jumlah baterai yang dipasang dalam mode sabotase
+     */
+    public void completeBatteryMission(int site, int sabotages) {
+        if (!missionActive || missionResolving) return;
+        missionResolving = true;
+        sabotageCount = sabotages;
+
+        boolean needsTwoFails = TeamSelectionGUI.requiresTwoFails(registeredPlayers.size(), currentRound);
+        missionSabotaged = sabotages >= (needsTwoFails ? 2 : 1);
+        boolean success = !missionSabotaged;
+
+        MinecraftServer server = server();
+        ServerLevel level = server == null ? null : server.getLevel(AvalonDimensions.AVALON);
+        if (level == null) return;
+        AvalonPillars.Site pillarSite = AvalonPillars.SITES.get(site);
+        BlockPos pillar = pillarSite.pillarPos();
+        double x = pillar.getX() + 0.5;
+        double z = pillar.getZ() + 0.5;
+        double orbY = pillar.getY() + PillarBlock.ORB_HEIGHT + 0.5;
+        int lead = PillarTimeline.LEAD_TICKS;
+
+        if (success) batteryMission.markCompleted(site);
+        startPillarCutscene(level, pillarSite, success ? PillarTimeline.SUCCESS_TICKS : PillarTimeline.FAIL_TICKS);
+
+        // Kamera sudah di tempat: pilar mulai menyala
+        delayedTasks.add(Scheduler.later(lead, () -> {
+            if (!gameRunning) return;
+            Fx.worldSound(level, x, pillar.getY(), z, SoundEvents.BEACON_ACTIVATE, 4f, 0.7f);
+            if (success) {
+                PillarBlock.setLit(level, pillar, true);
+            } else {
+                PillarBlock.overload(level, pillar);
+            }
+        }));
+
+        if (success) {
+            // Tiang sampai di puncak: bola terbentuk
+            delayedTasks.add(Scheduler.later(lead + PillarBlock.RISE_TICKS, () -> {
+                if (!gameRunning) return;
+                Fx.worldSound(level, x, orbY, z, SoundEvents.BEACON_POWER_SELECT, 4f, 1.0f);
+                for (ServerPlayer p : getOnlinePlayers()) Fx.sound(p, SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.8f, 1.0f);
+            }));
+            delayedTasks.add(Scheduler.later(PillarTimeline.SUCCESS_TICKS, () -> {
+                if (!gameRunning) return;
+                endPillarCutscene();
+                finishMission(true);
+            }));
+        } else {
+            // Tiang sampai di puncak: energinya meluap
+            delayedTasks.add(Scheduler.later(lead + PillarBlock.RISE_TICKS, () -> {
+                if (!gameRunning) return;
+                Fx.worldSound(level, x, orbY, z, SoundEvents.BEACON_DEACTIVATE, 4f, 0.6f);
+                Fx.worldSound(level, x, orbY, z, SoundEvents.WARDEN_SONIC_CHARGE, 4f, 0.7f);
+            }));
+            // Bolanya pecah
+            delayedTasks.add(Scheduler.later(lead + PillarBlock.OVERLOAD_BURST_TICK, () -> {
+                if (!gameRunning) return;
+                Fx.worldSound(level, x, orbY, z, SoundEvents.WARDEN_SONIC_BOOM, 4f, 0.9f);
+                Fx.worldSound(level, x, orbY, z, SoundEvents.GLASS_BREAK, 4f, 0.5f);
+                Fx.particle(level, ParticleTypes.FLASH, x, orbY, z, 1, 0, 0, 0, 0);
+                Fx.particle(level, ParticleTypes.END_ROD, x, orbY, z, 120, 0.2, 0.2, 0.2, 0.45);
+                Fx.particle(level, ParticleTypes.LARGE_SMOKE, x, orbY, z, 40, 0.6, 0.6, 0.6, 0.08);
+            }));
+            delayedTasks.add(Scheduler.later(PillarTimeline.FAIL_TICKS, () -> {
+                if (!gameRunning) return;
+                endPillarCutscene();
+                triggerSabotageCountdown();
+            }));
+        }
+    }
+
+    // ── Cutscene pilar ────────────────────────────────────────────────────────
+
+    /** Tinggi tempat para player diparkir selama cutscene, di atas bola pilar. */
+    private static final int CUTSCENE_PARK_HEIGHT = PillarBlock.ORB_HEIGHT + 12;
+    private boolean pillarCutsceneRunning = false;
+
+    /**
+     * Semua player dibawa ke dekat pilar (tak terlihat, melayang di atasnya, tidak bisa bergerak)
+     * supaya area itu dimuat client-nya; kameranya sendiri digerakkan client (PillarCutsceneClient).
+     */
+    private void startPillarCutscene(ServerLevel level, AvalonPillars.Site site, int duration) {
+        pillarCutsceneRunning = true;
+        BlockPos pillar = site.pillarPos();
+        AvalonNetwork.PillarCutscene start = new AvalonNetwork.PillarCutscene(true, pillar,
+                site.facing().getStepX(), site.facing().getStepZ(), duration);
+
+        for (ServerPlayer p : getOnlinePlayers()) {
+            p.removeEffect(MobEffects.MOVEMENT_SLOWDOWN);
+            p.setGameMode(GameType.ADVENTURE);
+            p.getAbilities().mayfly = true;
+            p.getAbilities().flying = true;
+            p.onUpdateAbilities();
+            p.setInvisible(true);
+            teleport(p, level, pillar.getX() + 0.5, pillar.getY() + CUTSCENE_PARK_HEIGHT, pillar.getZ() + 0.5, 0f, 0f);
+            lockMovement(p);
+            AvalonNetwork.sendTo(p, start);
+        }
+    }
+
+    /** Kembalikan player seperti semula; setelah ini mereka dipindahkan ke kursi. */
+    private void endPillarCutscene() {
+        if (!pillarCutsceneRunning) return;
+        pillarCutsceneRunning = false;
+        for (ServerPlayer p : getOnlinePlayers()) {
+            unlockMovement(p);
+            p.getAbilities().mayfly = false;
+            p.getAbilities().flying = false;
+            p.onUpdateAbilities();
+            p.setInvisible(false);
+            AvalonNetwork.sendTo(p, AvalonNetwork.PillarCutscene.STOP);
+        }
+    }
+
+    /** Klik kiri dari client (lihat AvalonNetwork.LeftClick): dipakai item voting untuk "Tolak". */
+    public void handleLeftClick(ServerPlayer player) {
+        if (!gameRunning || votingManager == null || !votingManager.isVotingActive()) return;
+        if (!votingManager.isVoteItem(player.getMainHandItem())) return;
+        // Klik kiri sering terjadi: jangan ulangi suara yang sama
+        if (VotingManager.VOTE_TOLAK.equals(votingManager.getVote(player))) return;
+        votingManager.castVote(player, VotingManager.VOTE_TOLAK);
+    }
+
+    /**
+     * Dipanggil saat pilar yang raknya penuh ternyata disabotase (bolanya pecah).
+     * Tampilkan pesan, lalu langsung teleport semua player ke seat.
      */
     public void triggerSabotageCountdown() {
         if (!missionActive) return;
         missionActive = false;
+        batteryMission.stop(server());
         String teamMembers = String.join(", ", currentMissionTeam);
         stopHotbarLock();
         stopSabotageMechanic();
@@ -1908,7 +1867,6 @@ public class GameManager {
             Txt.t("  Anggota tim: ", ChatFormatting.WHITE)
                 .append(Txt.t(teamMembers, ChatFormatting.GREEN, ChatFormatting.BOLD))
         );
-        broadcast(Txt.t("  Kamu akan diteleport kembali dalam 20 detik", ChatFormatting.GRAY));
         broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.DARK_RED));
         broadcast(Txt.blank());
 
@@ -1916,96 +1874,16 @@ public class GameManager {
             p.setGameMode(GameType.ADVENTURE);
         }
 
-        endMissionCountdownTask = new Task() {
-            int seconds = 20;
-
-            @Override
-            public void run() {
-                if (!gameRunning) { cancel(); return; }
-                if (seconds <= 0) {
-                    cancel();
-                    teleportAllToSeat();
-                    if (evilMissionFails + 1 >= 3) {
-                        triggerEvilWin("3 misi telah disabotase");
-                        return;
-                    }
-                    startDiscussionPhase(false);
-                    return;
-                }
-                for (ServerPlayer p : getOnlinePlayers()) {
-                    Fx.actionBar(p,
-                        Txt.t("💀 Kembali ke arena dalam ", ChatFormatting.RED)
-                            .append(Txt.t(seconds + "s", ChatFormatting.WHITE, ChatFormatting.BOLD))
-                    );
-                }
-                seconds--;
-            }
-        }.runTimer(0L, 20L);
+        // Cutscene pilar sudah menunjukkan hasilnya: langsung kembali ke kursi
+        teleportAllToSeat();
+        if (evilMissionFails + 1 >= 3) {
+            triggerEvilWin("3 misi telah disabotase");
+            return;
+        }
+        startDiscussionPhase(false);
     }
 
     // ── Proximity Checker ─────────────────────────────────────────────────────
-
-    /**
-     * Cek setiap 5 tick semua lokasi tanaman:
-     * - Tanaman jadi dead bush (& missionSabotaged) dan ada anggota tim dalam 10 blok → sabotase
-     * - Blok tanaman hancur menjadi AIR → misi sukses
-     */
-    private void startMissionBlockChecker(List<String> team, ServerLevel world) {
-        stopProximityChecker();
-
-        proximityTask = new Task() {
-            @Override
-            public void run() {
-                if (!missionActive || !gameRunning) { cancel(); return; }
-
-                for (int i = 0; i < PLANT_LOCATIONS.length; i++) {
-                    if (completedPlants.contains(i)) {
-                        continue;
-                    }
-                    int[] loc = PLANT_LOCATIONS[i];
-                    BlockState plantBlock = world.getBlockState(new BlockPos(loc[0], loc[1], loc[2]));
-
-                    if ((plantBlock.is(Blocks.DEAD_BUSH)
-                            || plantBlock.is(Blocks.HANGING_ROOTS))
-                            && missionSabotaged) {
-
-                        Vec3 plantLoc = new Vec3(loc[0] + 0.5, loc[1], loc[2] + 0.5);
-
-                        for (String name : team) {
-
-                            ServerPlayer p = getPlayerExact(name);
-
-                            if (p == null)
-                                continue;
-
-                            if (p.serverLevel() != world)
-                                continue;
-
-                            if (p.position().distanceTo(plantLoc) <= 10.0) {
-
-                                cancel();
-
-                                stopSabotageMechanic();
-
-                                triggerSabotageCountdown();
-                                return;
-                            }
-                        }
-                    }
-
-                    // Tanaman dipanen (menjadi AIR) oleh anggota tim
-                    if (plantBlock.is(Blocks.AIR) || plantBlock.is(Blocks.CAVE_AIR)) {
-                        cancel();
-                        completedPlants.add(i);
-                        lastCollectedPlantIndex = i;
-                        stopSabotageMechanic();
-                        finishMission(true);
-                        return;
-                    }
-                }
-            }
-        }.runTimer(5L, 5L);
-    }
 
     private void stopProximityChecker() {
         if (proximityTask != null) {
@@ -2017,13 +1895,14 @@ public class GameManager {
     // ── End Mission ───────────────────────────────────────────────────────────
 
     /**
-     * Akhiri misi sukses (tanaman dihancurkan).
+     * Akhiri misi sukses (pilar menyala).
      * Sabotase ditangani oleh triggerSabotageCountdown().
      */
     private void finishMission(boolean success) {
         String teamMembers = String.join(", ", currentMissionTeam);
         if (!missionActive) return;
         missionActive = false;
+        batteryMission.stop(server());
         stopHotbarLock();
         stopSabotageMechanic();
         stopProximityChecker();
@@ -2040,7 +1919,7 @@ public class GameManager {
             broadcast(Txt.blank());
             broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.GREEN));
             broadcast(Txt.t("  ✅ Misi ke-" + currentRound + " berhasil!", ChatFormatting.GREEN, ChatFormatting.BOLD));
-            broadcast(Txt.t("  Tanaman berhasil didapatkan oleh tim.", ChatFormatting.YELLOW));
+            broadcast(Txt.t("  Pilar berhasil dinyalakan oleh tim.", ChatFormatting.YELLOW));
             broadcast(
                 Txt.t("  Jumlah sabotase: ", ChatFormatting.GRAY)
                     .append(Txt.t(sabotageCount, ChatFormatting.RED, ChatFormatting.BOLD))
@@ -2049,162 +1928,41 @@ public class GameManager {
                 Txt.t("  Anggota tim: ", ChatFormatting.WHITE)
                     .append(Txt.t(teamMembers, ChatFormatting.GREEN, ChatFormatting.BOLD))
             );
-            broadcast(Txt.t("  Kamu akan diteleport kembali dalam 10 detik", ChatFormatting.GRAY));
             broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.GREEN));
             broadcast(Txt.blank());
 
             for (ServerPlayer p : getOnlinePlayers()) {
                 p.setGameMode(GameType.ADVENTURE);
             }
-            endMissionCountdownTask = new Task() {
-                int seconds = 10;
-
-                @Override
-                public void run() {
-                    if (!gameRunning) { cancel(); return; }
-                    if (seconds <= 0) {
-                        cancel();
-                        startPlantDepositCutscene();
-                        return;
-                    }
-                    for (ServerPlayer p : getOnlinePlayers()) {
-                        Fx.actionBar(p,
-                            Txt.t("✅ Kembali ke arena dalam ", ChatFormatting.GREEN)
-                                .append(Txt.t(seconds + "s", ChatFormatting.WHITE, ChatFormatting.BOLD))
-                        );
-                    }
-                    seconds--;
-                }
-            }.runTimer(0L, 20L);
+            // Cutscene pilar sudah menunjukkan hasilnya: langsung kembali ke kursi
+            returnAfterSuccess();
         }
     }
 
-    private void startPlantDepositCutscene() {
+    /** Misi sukses: semua player kembali ke kursi, lalu lanjut ke diskusi (atau fase Assassin). */
+    private void returnAfterSuccess() {
+        teleportAllToSeat();
 
-        ServerLevel world = getGameWorld();
-        if (world == null) return;
+        // Delay 15L: tunggu seat spawn (5L) + 1 server tick settle,
+        // lalu konfirmasi rotasi ke base dan lanjut
+        Scheduler.later(15L, () -> {
+            if (!gameRunning) return;
+            for (ServerPlayer p : getOnlinePlayers()) {
+                float yaw = yawTowardBase(p.getX(), p.getZ());
+                setRotation(p, yaw, 0);
+            }
+            if (currentMission >= 3) {
+                ServerPlayer assassin = getPlayerWithRole(getOnlinePlayers(), Role.ASSASSIN);
 
-        double camX = BASE_X - 1.2;
-        double camY = BASE_Y + 1;
-        double camZ = BASE_Z + 1.5;
-
-        // Semua player terbang tak terlihat + lock camera
-        for (ServerPlayer p : getOnlinePlayers()) {
-
-            p.getInventory().clearContent();
-            p.setGameMode(GameType.ADVENTURE);
-            p.getAbilities().mayfly = true;
-            p.getAbilities().flying = true;
-            p.onUpdateAbilities();
-            p.setInvisible(true);
-            teleport(p, world, camX, camY, camZ, -115f, 51f);
-
-            lockMovement(p);
-            lockCamera(
-                p,
-                -115f,
-                51f
-            );
-        }
-
-        ArmorStand stand = spawnStand(world, BASE_X + 1.5, BASE_Y + 1, BASE_Z + 0.5, 65f, true, false, true);
-
-        stand.setItemSlot(EquipmentSlot.MAINHAND,
-            new ItemStack(PLANT_MATERIALS[lastCollectedPlantIndex].asItem())
-        );
-
-        stand.setRightArmPose(new Rotations(-80f, 0f, 10f));
-
-        new Task() {
-
-            double y = BASE_Y + 2;
-
-            @Override
-            public void run() {
-
-                if (!gameRunning) {
-                    stand.discard();
-                    cancel();
+                if (assassin == null) {
+                    triggerGoodWin();
                     return;
                 }
-
-                y -= 0.1;
-
-                stand.moveTo(stand.getX(), y, stand.getZ(), stand.getYRot(), stand.getXRot());
-
-                if (y <= BASE_Y - 1.5) {
-
-                    cancel();
-
-                    // tanaman masuk cauldron
-                    stand.discard();
-
-                    Vector3f particleColor;
-
-                    Block plant = PLANT_MATERIALS[lastCollectedPlantIndex];
-                    if (plant == Blocks.PITCHER_PLANT) {
-                        particleColor = new Vector3f(0f, 1f, 1f); // cyan
-                    } else if (plant == Blocks.TORCHFLOWER) {
-                        particleColor = new Vector3f(1f, 215f / 255f, 0f); // gold
-                    } else if (plant == Blocks.SPORE_BLOSSOM) {
-                        particleColor = new Vector3f(180f / 255f, 100f / 255f, 220f / 255f); // ungu
-                    } else {
-                        particleColor = new Vector3f(1f, 1f, 1f);
-                    }
-
-                    Fx.particle(world, new DustParticleOptions(particleColor, 2f),
-                        BASE_X + 0.5, BASE_Y + 0.8, BASE_Z + 0.5,
-                        60, 0, 0, 0, 1);
-
-                    // ledakan
-                    Fx.particle(world, ParticleTypes.EXPLOSION,
-                        BASE_X + 0.5, BASE_Y + 1, BASE_Z + 0.5,
-                        1, 0, 0, 0, 1);
-
-                    Fx.worldSound(world, BASE_X, BASE_Y, BASE_Z, SoundEvents.GENERIC_EXPLODE, 1f, 1.2f);
-
-                    Scheduler.later(40L, () -> {
-                        if (!gameRunning) return;
-
-                        // Unlock camera DULU sebelum teleport,
-                        // supaya camera-lock loop tidak override rotasi
-                        for (ServerPlayer p : getOnlinePlayers()) {
-                            unlockCamera(p);
-                            unlockMovement(p);
-                            p.getAbilities().mayfly = false;
-                            p.getAbilities().flying = false;
-                            p.onUpdateAbilities();
-                            p.setInvisible(false);
-                        }
-
-                        // ToSeat sudah set yaw ke arah base secara sinkron
-                        teleportAllToSeat();
-
-                        // Delay 15L: tunggu seat spawn (5L) + 1 server tick settle,
-                        // lalu konfirmasi rotasi ke base dan lanjut
-                        Scheduler.later(15L, () -> {
-                            if (!gameRunning) return;
-                            for (ServerPlayer p : getOnlinePlayers()) {
-                                float yaw = yawTowardBase(p.getX(), p.getZ());
-                                setRotation(p, yaw, 0);
-                            }
-                            if (currentMission >= 3) {
-                                ServerPlayer assassin = getPlayerWithRole(getOnlinePlayers(), Role.ASSASSIN);
-
-                                if (assassin == null) {
-                                    triggerGoodWin();
-                                    return;
-                                }
-                                startAssassinationPhase();
-                            } else {
-                                startDiscussionPhase(true);
-                            }
-                        });
-                    });
-                }
+                startAssassinationPhase();
+            } else {
+                startDiscussionPhase(true);
             }
-
-        }.runTimer(0L, 1L);
+        });
     }
 
     /**
@@ -2214,6 +1972,9 @@ public class GameManager {
     private void teleportAllToSeat() {
         ServerLevel world = tableWorld();
         if (world == null) return;
+
+        // Misi sudah selesai: mahkota raja muncul lagi
+        sendCrown(false);
 
         for (int i = 0; i < Math.min(registeredPlayers.size(), PLAYER_SLAB_POSITIONS.length); i++) {
 
@@ -2251,7 +2012,7 @@ public class GameManager {
 
     /**
      * Mulai fase diskusi.
-     * Dipanggil setelah misi gagal (sabotase) dan setelah animasi deposit tanaman.
+     * Dipanggil setelah misi gagal (sabotase) dan setelah misi sukses.
      * @param afterSuccess true = lanjut ke onMissionSuccess, false = onMissionFailed
      */
     private void startDiscussionPhase(boolean afterSuccess) {
@@ -2832,7 +2593,7 @@ public class GameManager {
         giveAssassinBow();
     }
 
-    /** Berikan bow 1-durability + arrow ke player dengan role ASSASSIN. */
+    /** Berikan bow 1-durability ke player dengan role ASSASSIN. */
     public void giveAssassinBow() {
         assassinBowActive = true;
         for (ServerPlayer p : getOnlinePlayers()) {
@@ -2852,10 +2613,11 @@ public class GameManager {
             // Tag agar listener tahu ini bow assassin
             AvalonItems.setTag(bow, ASSASSIN_BOW_KEY, "true");
 
-            ItemStack arrow = new ItemStack(Items.ARROW, 1);
+            // Inventory cuma 1 slot: tidak ada item arrow. Infinity + AssassinationListener#onArrowNock
+            // membuat bow tetap bisa ditarik dan menembak.
+            bow.enchant(Enchantments.INFINITY_ARROWS, 1);
 
             p.getInventory().setItem(0, bow);
-            p.getInventory().setItem(1, arrow);
             setHeldItemSlot(p, 0);
 
             Fx.title(p,
@@ -3326,7 +3088,10 @@ public class GameManager {
         }
 
         // 5. Bersihkan sisa inventory dari fase sebelumnya
-        player.getInventory().clearContent();
+        //    (anggota tim misi: baterai yang sedang dibawanya jangan ikut hilang)
+        if (!(missionActive && currentMissionTeam.contains(name))) {
+            player.getInventory().clearContent();
+        }
 
         // 6. Reset scale ke 1.0 (bisa saja bawa scale 1.5 dari fase sebelumnya)
         PlayerScale.set(player, 1.0);
@@ -3336,13 +3101,11 @@ public class GameManager {
         // ── Fase misi (anggota tim) ──────────────────────────────────────────
         if (missionActive && currentMissionTeam.contains(name)) {
             player.setGameMode(GameType.SURVIVAL);
-            ItemStack shears = makeShears(player);
-            player.getInventory().setItem(0, shears);
             setHeldItemSlot(player, 0);
             player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN,
                 MobEffectInstance.INFINITE_DURATION, 0, false, false, false));
             player.sendSystemMessage(
-                Txt.t("  🌿 Kamu kembali ke misi! Lanjutkan mengumpulkan tanaman.", ChatFormatting.GREEN)
+                Txt.t("  🌿 Kamu kembali ke misi! Lanjutkan memasang baterai.", ChatFormatting.GREEN)
             );
             return;
         }
@@ -3641,6 +3404,7 @@ public class GameManager {
         broadcast(Txt.blank());
 
         missionActive = false;
+        batteryMission.stop(server());
         stopHotbarLock();
         stopSabotageMechanic();
         stopProximityChecker();
@@ -3678,6 +3442,17 @@ public class GameManager {
 
         stopAssassinationPhase();
 
+        // Cutscene pilar yang masih berjalan: kembalikan player, lalu bawa ke titik datang
+        // (mereka sedang diparkir tinggi di atas pilar)
+        if (pillarCutsceneRunning) {
+            endPillarCutscene();
+            for (ServerPlayer p : getOnlinePlayers()) AvalonPortal.teleportToSpawn(p);
+        }
+
+        // Pilar mati, rak pilar kosong & tertutup, gudang penuh
+        // (hanya kalau memang ada game: cleanup juga dipanggil saat server berhenti)
+        if (gameRunning) batteryMission.reset(server());
+
         // Cancel voting jika sedang berjalan
         if (votingManager != null) {
             votingManager.cancelVoting();
@@ -3692,8 +3467,7 @@ public class GameManager {
         currentRevealSeconds = -1;
         missionActive     = false;
         missionSabotaged  = false;
-        missionPlantLocation = null;
-        completedPlants.clear();
+        missionResolving = false;
         currentMissionTeam.clear();
         discussionActive = false;
         discussionAfterSuccess = false;
@@ -3730,6 +3504,7 @@ public class GameManager {
             unlockMovement(p);
             AvalonNetwork.sendTo(p, AvalonNetwork.Reveal.END);
             AvalonNetwork.sendTo(p, AvalonNetwork.Crown.NONE);
+            AvalonNetwork.sendTo(p, new AvalonNetwork.OneSlot(false));
         }
         lockedYaw.clear();
         lockedPitch.clear();
@@ -3782,7 +3557,6 @@ public class GameManager {
             toRemove.forEach(Entity::discard);
             gameWorld.setBlock(new BlockPos(BASE_X, BASE_Y, BASE_Z), Blocks.AIR.defaultBlockState(), 3);
             gameWorld.setBlock(new BlockPos(BASE_X, BASE_Y - 1, BASE_Z), Blocks.CHISELED_STONE_BRICKS.defaultBlockState(), 3);
-            clearAllMissionPlants(gameWorld);
         }
     }
 }

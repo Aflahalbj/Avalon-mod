@@ -9,7 +9,7 @@ import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 /**
- * Menangani interaksi player dengan item voting (Setuju / Tolak).
+ * Menangani interaksi player dengan item voting (klik kanan = Setuju, klik kiri = Tolak).
  */
 public class VotingListener implements ItemGuard.InventoryClickRule {
 
@@ -37,7 +37,7 @@ public class VotingListener implements ItemGuard.InventoryClickRule {
         return ctx.isDrag() && votingManager.isVoteItem(ctx.cursor());
     }
 
-    /** Klik kanan item voting → catat suara. */
+    /** Klik kanan item voting → suara Setuju. */
     @SubscribeEvent
     public void onInteractItem(PlayerInteractEvent.RightClickItem event) {
         handleInteract(event);
@@ -58,9 +58,7 @@ public class VotingListener implements ItemGuard.InventoryClickRule {
         if (!ItemGuard.firstInteract(player)) return;
         if (!gameManager.isGameRunning() || !votingManager.isVotingActive()) return;
 
-        String voteType = votingManager.getVoteType(item);
-        if (voteType == null) return;
-
-        votingManager.castVote(player, voteType);
+        // Klik kanan = Setuju. Klik kiri (Tolak) datang lewat paket: lihat GameManager#handleLeftClick
+        votingManager.castVote(player, VotingManager.VOTE_SETUJU);
     }
 }

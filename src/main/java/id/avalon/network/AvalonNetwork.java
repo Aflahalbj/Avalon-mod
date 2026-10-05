@@ -1,10 +1,14 @@
 package id.avalon.network;
 
 import id.avalon.AvalonMod;
+import id.avalon.block.BatteryRackBlock;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkDirection;
@@ -23,7 +27,7 @@ import java.util.function.Supplier;
  */
 public final class AvalonNetwork {
 
-    private static final String PROTOCOL = "2";
+    private static final String PROTOCOL = "4";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(AvalonMod.MOD_ID, "main"),
@@ -58,6 +62,14 @@ public final class AvalonNetwork {
                 KingRoulette::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         CHANNEL.registerMessage(id++, Crown.class, Crown::encode, Crown::decode,
                 Crown::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(id++, OneSlot.class, OneSlot::encode, OneSlot::decode,
+                OneSlot::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(id++, LeftClick.class, LeftClick::encode, LeftClick::decode,
+                LeftClick::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(id++, RackClick.class, RackClick::encode, RackClick::decode,
+                RackClick::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(id++, PillarCutscene.class, PillarCutscene::encode, PillarCutscene::decode,
+                PillarCutscene::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     // ── Helpers kirim ─────────────────────────────────────────────────────────
@@ -321,6 +333,104 @@ public final class AvalonNetwork {
         static void handle(Crown m, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> () -> id.avalon.client.ClientPacketHandler.crown(m)));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    /** Inventory 1 slot aktif / tidak (selama game): client mengganti hotbar & mengunci inventory. */
+    public record OneSlot(boolean active) {
+        static void encode(OneSlot m, FriendlyByteBuf buf) {
+            buf.writeBoolean(m.active);
+        }
+
+        static OneSlot decode(FriendlyByteBuf buf) {
+            return new OneSlot(buf.readBoolean());
+        }
+
+        static void handle(OneSlot m, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> () -> id.avalon.client.ClientPacketHandler.oneSlot(m.active)));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    /**
+     * Client → server: player menekan tombol serang (klik kiri). Server tidak punya event untuk
+     * klik kiri di udara, padahal item voting memakainya untuk "Tolak".
+     */
+    public record LeftClick() {
+        static void encode(LeftClick m, FriendlyByteBuf buf) {
+        }
+
+        static LeftClick decode(FriendlyByteBuf buf) {
+            return new LeftClick();
+        }
+
+        static void handle(LeftClick m, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer sender = ctx.get().getSender();
+                AvalonMod mod = AvalonMod.getInstance();
+                if (sender != null && mod != null) mod.getGameManager().handleLeftClick(sender);
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    /** Client → server: klik kiri di lubang rak baterai (ambil / pasang), dengan titik persis yang diklik. */
+    public record RackClick(BlockPos pos, Direction face, Vec3 hit) {
+        /** Jarak terjauh mata player ke titik yang diklik (sedikit di atas jangkauan creative). */
+        private static final double MAX_REACH = 7.0;
+
+        static void encode(RackClick m, FriendlyByteBuf buf) {
+            buf.writeBlockPos(m.pos);
+            buf.writeEnum(m.face);
+            buf.writeDouble(m.hit.x);
+            buf.writeDouble(m.hit.y);
+            buf.writeDouble(m.hit.z);
+        }
+
+        static RackClick decode(FriendlyByteBuf buf) {
+            return new RackClick(buf.readBlockPos(), buf.readEnum(Direction.class),
+                    new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble()));
+        }
+
+        static void handle(RackClick m, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer sender = ctx.get().getSender();
+                if (sender == null || sender.isSpectator()) return;
+                // Titiknya harus di block itu dan dalam jangkauan player
+                if (!sender.level().isLoaded(m.pos)) return;
+                if (m.hit.distanceToSqr(Vec3.atCenterOf(m.pos)) > 1.0) return;
+                if (m.hit.distanceToSqr(sender.getEyePosition()) > MAX_REACH * MAX_REACH) return;
+                BatteryRackBlock.leftClick(sender, m.pos, m.face, m.hit);
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    /**
+     * Cutscene pilar di akhir misi. {@code active=true}: kamera client menyorot pilar di {@code pos}
+     * selama {@code duration} tick, mulai dari sisi rak baterainya ({@code faceX}, {@code faceZ}).
+     * {@code active=false}: cutscene selesai, kamera kembali ke player.
+     */
+    public record PillarCutscene(boolean active, BlockPos pos, int faceX, int faceZ, int duration) {
+        public static final PillarCutscene STOP = new PillarCutscene(false, BlockPos.ZERO, 0, 0, 0);
+
+        static void encode(PillarCutscene m, FriendlyByteBuf buf) {
+            buf.writeBoolean(m.active);
+            buf.writeBlockPos(m.pos);
+            buf.writeByte(m.faceX);
+            buf.writeByte(m.faceZ);
+            buf.writeVarInt(m.duration);
+        }
+
+        static PillarCutscene decode(FriendlyByteBuf buf) {
+            return new PillarCutscene(buf.readBoolean(), buf.readBlockPos(), buf.readByte(), buf.readByte(), buf.readVarInt());
+        }
+
+        static void handle(PillarCutscene m, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> () -> id.avalon.client.ClientPacketHandler.pillarCutscene(m)));
             ctx.get().setPacketHandled(true);
         }
     }

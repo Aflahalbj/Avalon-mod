@@ -3,6 +3,7 @@ package id.avalon.listeners;
 import id.avalon.managers.GameManager;
 import id.avalon.models.Role;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.AbstractArrow;
@@ -11,6 +12,7 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraftforge.event.entity.ProjectileImpactEvent;
 import net.minecraftforge.event.entity.item.ItemTossEvent;
+import net.minecraftforge.event.entity.player.ArrowNockEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -75,6 +77,20 @@ public class AssassinationListener implements ItemGuard.InventoryClickRule {
             // Hanya proses jika kena blok (bukan entity)
             gameManager.handleAssassinArrowMiss();
         }
+    }
+
+    // ── Bow tanpa arrow ───────────────────────────────────────────────────────
+
+    /**
+     * Inventory cuma 1 slot, jadi assassin tidak membawa arrow. Bow-nya ber-Infinity (menembak tanpa
+     * arrow); di sini bow dibuat tetap bisa ditarik walau tidak ada arrow sama sekali.
+     * Jalan di client dan server.
+     */
+    @SubscribeEvent
+    public void onArrowNock(ArrowNockEvent event) {
+        if (event.hasAmmo() || !gameManager.isAssassinBowItem(event.getBow())) return;
+        event.getEntity().startUsingItem(event.getHand());
+        event.setAction(InteractionResultHolder.consume(event.getBow()));
     }
 
     // ── Cegah drop bow / skip assassination ───────────────────────────────────

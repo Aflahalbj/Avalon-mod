@@ -1,6 +1,7 @@
 {
   "variants": {
-    "lit=false": { "model": "avalon:block/pillar" },
-    "lit=true": { "model": "avalon:block/pillar_on" }
+    "lit=true": { "model": "avalon:block/pillar_on" },
+    "lit=false,overload=true": { "model": "avalon:block/pillar_on" },
+    "lit=false,overload=false": { "model": "avalon:block/pillar" }
   }
 }
