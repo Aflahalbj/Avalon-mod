@@ -10,6 +10,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraft.world.phys.Vec3;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -32,6 +33,11 @@ public final class AvalonPortal {
     public static final BlockPos SPAWN = new BlockPos(-422, 191, -496);
     private static final float SPAWN_YAW = 0f;
     private static final float SPAWN_PITCH = -25f;
+
+    /** Tengah cincin dalam portal raksasa (tempat bola kacanya), dipakai cutscene akhir game. */
+    public static final Vec3 GATE_CENTER = new Vec3(-421.5, 211.0, -475.5);
+    /** Titik di kaki cincin (puncak tangga) tempat player melangkah masuk portal. */
+    public static final Vec3 GATE_ENTRY = new Vec3(-421.5, 199.0, -476.2);
 
     private static final String DATA_NAME = "avalon_portal";
 

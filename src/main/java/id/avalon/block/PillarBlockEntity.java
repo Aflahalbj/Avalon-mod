@@ -74,7 +74,9 @@ public class PillarBlockEntity extends BlockEntity {
         lastPower = power;
 
         if (overload) {
-            // Animasi meluap punya linimasanya sendiri; setelah selesai pilar mati tanpa animasi turun
+            // Animasi meluap punya linimasanya sendiri; setelah selesai pilar mati tanpa animasi turun.
+            // Bola yang sudah menyala tidak mengulang dari tiang naik: ia langsung memerah.
+            if (overloadAge < 0 && power >= 0.99f) overloadAge = PillarBlock.OVERLOAD_LIT_SKIP;
             overloadAge++;
             beam = power = 0f;
             return;

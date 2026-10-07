@@ -89,6 +89,14 @@ public final class ClientPacketHandler {
         CrownClient.set(msg.king(), msg.seat(), msg.animate());
     }
 
+    public static void endingStart(AvalonNetwork.EndingStart msg) {
+        EndingClient.start(msg);
+    }
+
+    public static void endingStop() {
+        EndingClient.stop();
+    }
+
     static void applyRotation(float yaw, float pitch) {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return;

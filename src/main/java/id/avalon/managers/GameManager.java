@@ -13,6 +13,8 @@ import id.avalon.core.Scheduler;
 import id.avalon.core.Task;
 import id.avalon.core.Txt;
 import id.avalon.cutscene.PortalCutscene;
+import id.avalon.cutscene.EndingCutscene;
+import id.avalon.cutscene.EndingTimeline;
 import id.avalon.cutscene.KingRouletteTimeline;
 import id.avalon.cutscene.PillarTimeline;
 import id.avalon.cutscene.PortalTimeline;
@@ -42,7 +44,6 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.LightningBolt;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.decoration.ArmorStand;
@@ -61,6 +62,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.state.properties.SlabType;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.ForgeMod;
 import net.minecraftforge.server.ServerLifecycleHooks;
@@ -277,6 +280,9 @@ public class GameManager {
         MinecraftServer server = server();
         if (server == null) return;
 
+        // Bot player offline yang ikut misi
+        batteryMission.tick(server);
+
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
 
             // Camera lock (sinkronkan rotasi server; client mengunci sendiri via packet)
@@ -404,6 +410,7 @@ public class GameManager {
     }
 
     public boolean unregisterPlayer(String playerName) {
+        forcedRoles.remove(playerName);
         return registeredPlayers.remove(playerName);
     }
 
@@ -465,13 +472,82 @@ public class GameManager {
 
     private void assignRoles(List<ServerPlayer> players) {
         List<Role> roles = getRolesForPlayerCount(players.size());
-        Collections.shuffle(roles);
         playerRoles.clear();
         roleNames.clear();
-        for (int i = 0; i < players.size(); i++) {
-            playerRoles.put(players.get(i).getUUID(), roles.get(i));
-            roleNames.put(players.get(i).getUUID(), players.get(i).getGameProfile().getName());
+
+        // Role yang sudah diatur lewat /avalon setrole dipakai dulu; sisanya diacak ke player lain
+        List<ServerPlayer> unassigned = new ArrayList<>();
+        for (ServerPlayer p : players) {
+            Role forced = forcedRoles.get(p.getGameProfile().getName());
+            if (forced != null && roles.remove(forced)) {
+                playerRoles.put(p.getUUID(), forced);
+            } else {
+                unassigned.add(p);
+            }
+            roleNames.put(p.getUUID(), p.getGameProfile().getName());
         }
+        Collections.shuffle(roles);
+        for (int i = 0; i < unassigned.size(); i++) {
+            playerRoles.put(unassigned.get(i).getUUID(), roles.get(i));
+        }
+    }
+
+    // ===== ROLE YANG DIATUR MANUAL (/avalon setrole) =====
+
+    /** Nama player → role yang dipastikan didapatnya di game berikutnya. */
+    private final Map<String, Role> forcedRoles = new LinkedHashMap<>();
+
+    public enum SetRoleResult { OK, GAME_RUNNING, NOT_REGISTERED, BAD_PLAYER_COUNT, NOT_ACTIVE, TAKEN }
+
+    /** Role yang aktif untuk jumlah player terdaftar saat ini (kosong kalau jumlahnya belum 5-10). */
+    public List<Role> getActiveRoles() {
+        int n = registeredPlayers.size();
+        return n < 5 || n > PLAYER_SLAB_POSITIONS.length ? List.of() : getCustomRoles(n);
+    }
+
+    public Map<String, Role> getForcedRoles() {
+        return Collections.unmodifiableMap(forcedRoles);
+    }
+
+    /**
+     * Pastikan {@code playerName} mendapat {@code role} di game berikutnya; null = kembali diacak.
+     * Hanya role yang aktif untuk jumlah player terdaftar yang bisa dipilih, dan tidak melebihi
+     * jumlah role itu di susunan (jadi tidak bisa dobel, kecuali role yang memang ada beberapa
+     * seperti Loyal Servant / Minion).
+     */
+    public SetRoleResult setForcedRole(String playerName, Role role) {
+        if (gameRunning) return SetRoleResult.GAME_RUNNING;
+        if (!registeredPlayers.contains(playerName)) return SetRoleResult.NOT_REGISTERED;
+        if (role == null) {
+            forcedRoles.remove(playerName);
+            return SetRoleResult.OK;
+        }
+        List<Role> active = getActiveRoles();
+        if (active.isEmpty()) return SetRoleResult.BAD_PLAYER_COUNT;
+        int available = Collections.frequency(active, role);
+        if (available == 0) return SetRoleResult.NOT_ACTIVE;
+
+        int taken = 0;
+        for (Map.Entry<String, Role> entry : forcedRoles.entrySet()) {
+            if (entry.getValue() == role && !entry.getKey().equals(playerName)) taken++;
+        }
+        if (taken >= available) return SetRoleResult.TAKEN;
+
+        forcedRoles.put(playerName, role);
+        return SetRoleResult.OK;
+    }
+
+    // ===== DEBUG: SELALU RAJA (/avalon debug alwaysking) =====
+
+    /** Nama player yang selalu jadi raja (untuk tes); null = raja bergilir seperti biasa. */
+    private String alwaysKing = null;
+
+    public void setAlwaysKing(String playerName) {
+        this.alwaysKing = playerName;
+    }
+
+    public String getAlwaysKing() {
+        return alwaysKing;
     }
 
     private final Map<Integer, List<Role>> customRoles = new HashMap<>();
@@ -1158,8 +1234,9 @@ public class GameManager {
             return Double.compare(angleB, angleA);
         });
 
-        // Pilih Raja pertama secara acak
+        // Pilih Raja pertama secara acak (atau player "selalu raja" kalau sedang dites)
         int randomStart = (int) (Math.random() * sorted.size());
+        if (alwaysKing != null && sorted.contains(alwaysKing)) randomStart = sorted.indexOf(alwaysKing);
         for (int i = 0; i < sorted.size(); i++) {
             kingOrder.add(sorted.get((randomStart + i) % sorted.size()));
         }
@@ -1348,9 +1425,14 @@ public class GameManager {
         long wait = 0L;
         boolean travel = false;
         List<ServerPlayer> pulled = new ArrayList<>();
+        returnPoints.clear();
         for (ServerPlayer p : activePlayers) {
             if (!isOnline(p)) continue;
-            if (p.serverLevel() != tableWorld()) travel = true;
+            if (p.serverLevel() != tableWorld()) {
+                travel = true;
+                // Ke sinilah ia dikembalikan setelah cutscene akhir game
+                returnPoints.put(p.getUUID(), new ReturnPoint(p.serverLevel().dimension(), p.position(), p.getYRot(), p.getXRot()));
+            }
             // Hanya yang sedunia dengan pemulai game yang bisa tersedot portal yang sama
             if (cutsceneEnabled && isOnline(initiator) && p.serverLevel() == initiator.serverLevel()) {
                 pulled.add(p);
@@ -1594,7 +1676,12 @@ public class GameManager {
             }
         }
 
-        // ── Lock hotbar untuk team member (supaya selalu pegang shears) ───────
+        // ── Anggota tim yang offline diwakili bot-nya ────────────────────────
+        for (String name : team) {
+            if (getPlayerExact(name) == null) batteryMission.addBot(name);
+        }
+
+        // ── Lock hotbar untuk team member ────────────────────────────────────
         startHotbarLock(team);
 
         // ── Sabotage mechanic (actionbar) ────────────────────────────────────
@@ -1806,7 +1893,9 @@ public class GameManager {
             p.getAbilities().mayfly = true;
             p.getAbilities().flying = true;
             p.onUpdateAbilities();
-            p.setInvisible(true);
+            // Efek, bukan setInvisible: flag-nya dihitung ulang dari efek tiap ada efek yang berubah
+            // (mis. Slowness yang baru dicabut di atas), jadi tanpa efek player-nya terlihat lagi
+            p.addEffect(new MobEffectInstance(MobEffects.INVISIBILITY, duration + 40, 0, false, false, false));
             teleport(p, level, pillar.getX() + 0.5, pillar.getY() + CUTSCENE_PARK_HEIGHT, pillar.getZ() + 0.5, 0f, 0f);
             lockMovement(p);
             AvalonNetwork.sendTo(p, start);
@@ -1822,7 +1911,7 @@ public class GameManager {
             p.getAbilities().mayfly = false;
             p.getAbilities().flying = false;
             p.onUpdateAbilities();
-            p.setInvisible(false);
+            p.removeEffect(MobEffects.INVISIBILITY);
             AvalonNetwork.sendTo(p, AvalonNetwork.PillarCutscene.STOP);
         }
     }
@@ -1981,6 +2070,8 @@ public class GameManager {
             ServerPlayer p = getPlayerExact(registeredPlayers.get(i));
 
             if (p == null) {
+                // Bot-nya (kalau tadi ikut misi) kembali duduk di kursinya
+                reseatOfflineMannequin(i, registeredPlayers.get(i));
                 continue;
             }
 
@@ -2636,12 +2727,6 @@ public class GameManager {
         }
     }
 
-    /** Kill player (setara setGameMode(SURVIVAL) + setHealth(0)). */
-    private void killPlayer(ServerPlayer p) {
-        p.setGameMode(GameType.SURVIVAL);
-        p.kill();
-    }
-
     /**
      * Dipanggil dari listener saat arrow mengenai entity.
      * Jika arrow adalah assassin arrow → tentukan menang/kalah.
@@ -2659,21 +2744,6 @@ public class GameManager {
         if (shooterRole != Role.ASSASSIN) return;
 
         assassinShotFired = true;
-
-        // Summon petir di target + kill jika player
-        if (target.level() instanceof ServerLevel targetWorld) {
-            LightningBolt bolt = EntityType.LIGHTNING_BOLT.create(targetWorld);
-            if (bolt != null) {
-                bolt.moveTo(target.getX(), target.getY(), target.getZ());
-                bolt.setVisualOnly(true);
-                targetWorld.addFreshEntity(bolt);
-            }
-        }
-
-        if (target instanceof ServerPlayer hitPlayer) {
-            // Kill target — sementara set survival agar kill bekerja
-            killPlayer(hitPlayer);
-        }
 
         if (!(target instanceof ServerPlayer targetPlayer)) {
             // Kena entity bukan player → salah
@@ -2698,13 +2768,13 @@ public class GameManager {
             broadcast(Txt.blank());
 
             delayedTasks.add(
-                Scheduler.later(60L, () -> {
+                Scheduler.later(30L, () -> {
                     if (!gameRunning) return;
                     triggerEvilWin("Assassin berhasil menemukan Merlin!");
                 })
             );
         } else {
-            // SALAH: Bukan Merlin → kubu jahat kalah, animasi meledak
+            // SALAH: Bukan Merlin → kubu jahat kalah
             broadcast(Txt.blank());
             broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.AQUA));
             broadcast(Txt.t("  🏆 ASSASSIN SALAH MENEBAK!", ChatFormatting.AQUA, ChatFormatting.BOLD));
@@ -2739,89 +2809,24 @@ public class GameManager {
         triggerAssassinFail();
     }
 
-    /**
-     * Assassin salah tebak → animasi scale 1.2 ↔ 1.0 beberapa kali,
-     * lalu partikel ledakan + suara + kill semua kubu jahat, lalu good win.
-     */
+    /** Assassin salah tebak / meleset → kubu baik menang (langsung ke cutscene akhir). */
     private void triggerAssassinFail() {
         if (!gameRunning) return;
-
-        // Kumpulkan semua player kubu jahat
-        List<ServerPlayer> evilPlayers = new ArrayList<>();
-        for (ServerPlayer p : getOnlinePlayers()) {
-            Role role = playerRoles.get(p.getUUID());
-            if (role != null && role.isEvil()) {
-                evilPlayers.add(p);
-            }
-        }
-
-        // Animasi scale 1.2 ↔ 1.0 × 5 kali (10 toggle, interval 5 tick = 0.25 detik)
-        new Task() {
-            int toggle = 0;
-            final int TOTAL_TOGGLES = 10;
-
-            @Override
-            public void run() {
-                if (!gameRunning) { cancel(); return; }
-
-                double scale = (toggle % 2 == 0) ? 1.2 : 1.0;
-                for (ServerPlayer p : evilPlayers) {
-                    if (isOnline(p)) {
-                        PlayerScale.set(p, scale);
-                    }
-                }
-
-                toggle++;
-
-                if (toggle >= TOTAL_TOGGLES) {
-                    cancel();
-
-                    // Reset scale ke 1.0
-                    for (ServerPlayer p : evilPlayers) {
-                        if (isOnline(p)) {
-                            PlayerScale.set(p, 1.0);
-                        }
-                    }
-
-                    // Partikel ledakan + suara + kill semua kubu jahat
-                    Scheduler.later(5L, () -> {
-                        if (!gameRunning) return;
-                        for (ServerPlayer p : evilPlayers) {
-                            if (!isOnline(p)) continue;
-                            ServerLevel w = p.serverLevel();
-                            double lx = p.getX(), ly = p.getY() + 1, lz = p.getZ();
-
-                            // Partikel ledakan besar
-                            Fx.particle(w, ParticleTypes.EXPLOSION, lx, ly, lz, 3, 0.3, 0.3, 0.3, 0);
-                            Fx.particle(w, ParticleTypes.EXPLOSION_EMITTER, lx, ly, lz, 1, 0, 0, 0, 0);
-                            Fx.particle(w, new DustParticleOptions(new Vector3f(200f / 255f, 0f, 0f), 2f),
-                                lx, ly, lz, 40, 0, 0, 0, 1);
-
-                            // Suara ledakan
-                            Fx.worldSound(w, lx, ly, lz, SoundEvents.GENERIC_EXPLODE, 1f, 0.9f);
-                            Fx.worldSound(w, lx, ly, lz, SoundEvents.WITHER_DEATH, 0.7f, 1.2f);
-
-                            // Kill player
-                            killPlayer(p);
-                        }
-
-                        // Lanjut ke good win setelah 1.5 detik
-                        Scheduler.later(30L, () -> {
-                            if (!gameRunning) return;
-                            triggerGoodWin();
-                        });
-                    });
-                }
-            }
-        }.runTimer(0L, 5L);
+        delayedTasks.add(Scheduler.later(40L, () -> {
+            if (!gameRunning) return;
+            triggerGoodWin();
+        }));
     }
 
     /**
-     * Kubu baik menang.
+     * Kubu baik menang: cutscene akhir (segitiga pilar, portal, perpisahan), lalu pengumuman.
      */
     private void triggerGoodWin() {
-        if (!gameRunning) return;
+        if (!gameRunning || endingStarted) return;
+        playEnding(EndingTimeline.WIN, "§b§lKUBU BAIK MENANG", "§3Mereka pulang lewat portal", this::announceGoodWin);
+    }
 
+    private void announceGoodWin() {
         broadcast(Txt.blank());
         broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.AQUA));
         broadcast(Txt.t("  🏆 KUBU BAIK MENANG!", ChatFormatting.AQUA, ChatFormatting.BOLD));
@@ -2842,16 +2847,18 @@ public class GameManager {
             }
         }
         broadcast(Txt.blank());
-
-        delayedTasks.add(Scheduler.later(100L, this::cleanup));
     }
 
     /**
-     * Kubu jahat menang (5x reject, 3 misi disabotase, atau Merlin terbunuh).
+     * Kubu jahat menang (5x reject, 3 misi disabotase, atau Merlin terbunuh): cutscene akhir, lalu pengumuman.
      */
     public void triggerEvilWin(String reason) {
-        if (!gameRunning) return;
+        if (!gameRunning || endingStarted) return;
+        int type = reason.contains("Merlin") ? EndingTimeline.MERLIN : EndingTimeline.EVIL;
+        playEnding(type, "§4§lKUBU JAHAT MENANG", "§c" + reason, () -> announceEvilWin(reason));
+    }
 
+    private void announceEvilWin(String reason) {
         broadcast(Txt.blank());
         broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.DARK_RED));
         broadcast(Txt.t("  ☠ KUBU JAHAT MENANG!", ChatFormatting.DARK_RED, ChatFormatting.BOLD));
@@ -2873,9 +2880,108 @@ public class GameManager {
             }
         }
         broadcast(Txt.blank());
+    }
 
-        // Akhiri game setelah 5 detik
-        delayedTasks.add(Scheduler.later(100L, this::cleanup));
+    // ── Cutscene akhir game ───────────────────────────────────────────────────
+
+    /** Tempat asal player sebelum dibawa ke dimensi Avalon. */
+    private record ReturnPoint(ResourceKey<Level> dimension, Vec3 pos, float yaw, float pitch) {}
+
+    private final Map<UUID, ReturnPoint> returnPoints = new HashMap<>();
+    /** Pemenang sudah ditentukan; cutscene akhir sedang (atau akan) berjalan. */
+    private boolean endingStarted = false;
+
+    /**
+     * Dudukkan player di kursi nomor {@code index} (untuk cutscene akhir; bisa dipakai di luar game).
+     * Kursi lamanya, kalau ada, dihapus.
+     */
+    public void seatForCutscene(ServerPlayer p, int index) {
+        ServerLevel world = tableWorld();
+        if (world == null || index < 0 || index >= PLAYER_SLAB_POSITIONS.length) return;
+        releaseFromSeat(p);
+        BlockPos slab = AvalonSeats.pos(index);
+        double x = slab.getX() + 0.5, z = slab.getZ() + 0.5;
+        float yaw = yawTowardBase(x, z);
+        p.teleportTo(world, x, slab.getY(), z, yaw, 0f);
+        ArmorStand seat = spawnSeat(world, x, slab.getY() + SEAT_HEIGHT, z, yaw);
+        p.startRiding(seat, true);
+    }
+
+    /** Turunkan player dari kursinya (kursinya ikut dihapus), melewati larangan turun selama game. */
+    public void releaseFromSeat(ServerPlayer p) {
+        Entity vehicle = p.getVehicle();
+        if (vehicle == null) return;
+        revealPhaseActive = true;
+        vehicle.ejectPassengers();
+        revealPhaseActive = false;
+        if (vehicle.getTags().contains("avalon_seat")) vehicle.discard();
+    }
+
+    /**
+     * Mainkan cutscene akhir, lalu umumkan pemenang, bereskan game, dan kembalikan semua player
+     * ke tempat asalnya (overworld).
+     */
+    private void playEnding(int type, String title, String subtitle, Runnable announce) {
+        endingStarted = true;
+        ServerLevel avalon = tableWorld();
+
+        List<ServerPlayer> good = new ArrayList<>();
+        List<ServerPlayer> evil = new ArrayList<>();
+        ServerPlayer merlin = null;
+        ServerPlayer assassin = null;
+        for (ServerPlayer p : getOnlinePlayers()) {
+            Role role = getRole(p);
+            if (role == null) continue;
+            (role.isGood() ? good : evil).add(p);
+            if (role == Role.MERLIN) merlin = p;
+            if (role == Role.ASSASSIN) assassin = p;
+        }
+
+        Runnable finish = () -> {
+            if (!gameRunning) return;
+            announce.run();
+            Map<UUID, ReturnPoint> points = new HashMap<>(returnPoints);
+            cleanup();
+            MinecraftServer server = server();
+            for (ServerPlayer p : getOnlinePlayers()) {
+                // Apa pun hasilnya (menang, kalah, Merlin terbunuh, 5x ditolak) semua pulang ke overworld:
+                // ke tempat asalnya, atau ke titik spawn dunia kalau ia memulai game dari dimensi Avalon
+                ReturnPoint point = points.get(p.getUUID());
+                ServerLevel home = point == null || server == null ? null : server.getLevel(point.dimension());
+                if (home != null) {
+                    p.teleportTo(home, point.pos().x, point.pos().y, point.pos().z, point.yaw(), point.pitch());
+                } else if (server != null) {
+                    ServerLevel overworld = server.overworld();
+                    BlockPos spawn = overworld.getSharedSpawnPos();
+                    p.teleportTo(overworld, spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5, overworld.getSharedSpawnAngle(), 0f);
+                }
+                Fx.title(p, title, subtitle, 10, 80, 30);
+                Fx.sound(p, SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
+            }
+        };
+
+        if (avalon == null || (good.isEmpty() && evil.isEmpty())) {
+            // Tidak bisa memainkan cutscene: langsung umumkan seperti biasa
+            delayedTasks.add(Scheduler.later(20L, finish));
+            return;
+        }
+
+        // Sisa fase terakhir tidak boleh mengganggu cutscene. Tugas yang masih tertunda dibatalkan:
+        // misalnya "dudukkan semua player" seusai misi, yang baru jalan beberapa tick kemudian dan
+        // akan menarik kubu jahat kembali ke kursinya di tengah cutscene.
+        for (Task task : delayedTasks) task.cancel();
+        delayedTasks.clear();
+        MinecraftServer server = server();
+        if (server != null) server.setPvpAllowed(false);
+        stopTeamSelectionActionBar();
+        for (ServerPlayer p : getOnlinePlayers()) {
+            p.getInventory().clearContent();
+            PlayerScale.set(p, 1.0);
+            unlockCamera(p);
+            AvalonNetwork.sendTo(p, AvalonNetwork.Crown.NONE);
+        }
+
+        EndingCutscene.play(this, avalon, type, good, evil, merlin, assassin, false, finish);
     }
 
     // ===== UTILS =====
@@ -2992,7 +3098,11 @@ public class GameManager {
 
         // 3. Fase misi — cek apakah seluruh tim offline (setelah player benar-benar keluar)
         if (missionActive) {
-            Scheduler.next(this::checkAllMissionTeamOffline);
+            Scheduler.next(() -> {
+                checkAllMissionTeamOffline();
+                // Masih ada anggota tim yang online: bot-nya melanjutkan misi menggantikan dia
+                if (missionActive && currentMissionTeam.contains(name)) batteryMission.addBot(name);
+            });
             return;
         }
 
@@ -3055,7 +3165,8 @@ public class GameManager {
 
         offlinePlayerRefs.remove(name);
 
-        // 1. Hapus mannequin
+        // 1. Hapus mannequin (kalau sedang jadi bot misi, ingat dulu posisinya)
+        Vec3 botPosition = batteryMission.botPosition(name);
         removeOfflineMannequin(name);
 
         // 2. Broadcast
@@ -3088,10 +3199,7 @@ public class GameManager {
         }
 
         // 5. Bersihkan sisa inventory dari fase sebelumnya
-        //    (anggota tim misi: baterai yang sedang dibawanya jangan ikut hilang)
-        if (!(missionActive && currentMissionTeam.contains(name))) {
-            player.getInventory().clearContent();
-        }
+        player.getInventory().clearContent();
 
         // 6. Reset scale ke 1.0 (bisa saja bawa scale 1.5 dari fase sebelumnya)
         PlayerScale.set(player, 1.0);
@@ -3099,13 +3207,22 @@ public class GameManager {
         ServerLevel world = player.serverLevel();
 
         // ── Fase misi (anggota tim) ──────────────────────────────────────────
-        if (missionActive && currentMissionTeam.contains(name)) {
+        if (missionActive && !missionResolving && currentMissionTeam.contains(name)) {
+            // Dia bisa saja keluar saat masih duduk: turunkan dari kursinya
+            unseatPlayer(player);
+            playerStateMap.put(player.getUUID(), OfflineState.FREE);
             player.setGameMode(GameType.SURVIVAL);
             setHeldItemSlot(player, 0);
+            // Menggantikan bot-nya: berdiri di posisi terakhir bot, membawa baterai yang sudah diambil bot
+            batteryMission.onReturn(player);
+            ServerLevel avalon = world.getServer().getLevel(AvalonDimensions.AVALON);
+            if (botPosition != null && avalon != null) {
+                teleport(player, avalon, botPosition.x, botPosition.y, botPosition.z, player.getYRot(), 0f);
+            }
             player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN,
                 MobEffectInstance.INFINITE_DURATION, 0, false, false, false));
             player.sendSystemMessage(
-                Txt.t("  🌿 Kamu kembali ke misi! Lanjutkan memasang baterai.", ChatFormatting.GREEN)
+                Txt.t("  🔋 Kamu kembali ke misi! Lanjutkan memasang baterai.", ChatFormatting.GREEN)
             );
             return;
         }
@@ -3284,6 +3401,35 @@ public class GameManager {
         if (mannequin != null && mannequin.isAlive()) mannequin.discard();
     }
 
+    /** UUID player offline yang punya mannequin, atau null. */
+    public UUID offlineUuid(String playerName) {
+        OfflineMannequinData data = offlinePlayerRefs.get(playerName);
+        return data == null ? null : data.uuid;
+    }
+
+    /**
+     * Turunkan mannequin player offline dari kursi palsunya supaya bisa berjalan (bot misi).
+     *
+     * @return mannequin-nya, atau null kalau player itu tidak punya mannequin
+     */
+    public MannequinEntity standOfflineMannequin(String playerName) {
+        if (!(offlineMannequins.get(playerName) instanceof MannequinEntity mannequin) || !mannequin.isAlive()) return null;
+        Entity seat = offlineMannequinSeats.remove(playerName);
+        mannequin.stopRiding();
+        if (seat != null && seat.isAlive()) seat.discard();
+        return mannequin;
+    }
+
+    /** Dudukkan lagi mannequin player offline di kursinya sendiri (setelah misi). */
+    private void reseatOfflineMannequin(int seatIndex, String playerName) {
+        OfflineMannequinData data = offlinePlayerRefs.get(playerName);
+        if (data == null || !offlineMannequins.containsKey(playerName)) return;
+        BlockPos slab = AvalonSeats.pos(seatIndex);
+        data.location = new Vec3(slab.getX() + 0.5, slab.getY() + SEAT_HEIGHT, slab.getZ() + 0.5);
+        removeOfflineMannequin(playerName);
+        spawnOfflineMannequin(data, OfflineState.SEATED);
+    }
+
     private void updateOfflineMannequin(String playerName, OfflineState state) {
 
         if (getPlayerExact(playerName) != null) {
@@ -3329,6 +3475,13 @@ public class GameManager {
         if (kingOrder.isEmpty()) return;
 
         teamSelectionSessions.clear();
+
+        // Debug: raja tidak bergilir, selalu player yang sama selama ia online
+        if (alwaysKing != null && kingOrder.contains(alwaysKing) && getPlayerExact(alwaysKing) != null) {
+            currentKingIndex = kingOrder.indexOf(alwaysKing);
+            announceKing();
+            return;
+        }
 
         for (int i = 0; i < kingOrder.size(); i++) {
 
@@ -3423,8 +3576,11 @@ public class GameManager {
     }
 
     public void cleanup() {
-        // Cutscene portal pembuka (kalau masih berjalan) ikut dihentikan
+        // Cutscene portal pembuka / cutscene akhir (kalau masih berjalan) ikut dihentikan
         PortalCutscene.stop(this);
+        EndingCutscene.stop();
+        endingStarted = false;
+        returnPoints.clear();
         if (AvalonMod.getInstance() != null && AvalonMod.getInstance().getTeamSelectionListener() != null) {
             AvalonMod.getInstance().getTeamSelectionListener().clearAllFloatingHeads();
         }

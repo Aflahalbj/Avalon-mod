@@ -14,11 +14,14 @@ import id.avalon.client.PortalCutsceneClient.Scene;
 import id.avalon.cutscene.PortalTimeline;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL12;
 
 /**
  * Gambar portal cutscene di dunia: celah cahaya yang melebar jadi pusaran gelap
@@ -44,7 +47,12 @@ final class PortalRenderer {
     /** Filter linear supaya lingkaran tidak pecah saat diperbesar. */
     static void prepareTextures() {
         for (ResourceLocation t : new ResourceLocation[]{CIRCLE, MOTE}) {
-            Minecraft.getInstance().getTextureManager().getTexture(t).setFilter(true, false);
+            AbstractTexture texture = Minecraft.getInstance().getTextureManager().getTexture(t);
+            texture.setFilter(true, false);
+            // Di luar gambar tidak berulang (dipakai GateRenderer, yang memetakan satu gambar ke banyak blok)
+            texture.bind();
+            RenderSystem.texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
+            RenderSystem.texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
         }
     }
 

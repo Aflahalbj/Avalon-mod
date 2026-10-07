@@ -73,6 +73,7 @@ public final class ClientEvents {
                 OneSlotHud.tick();
                 RackClient.tick();
                 PillarCutsceneClient.tick();
+                EndingClient.tick();
             }
         }
 
@@ -82,6 +83,7 @@ public final class ClientEvents {
             enforceCameraLock();
             PortalCutsceneClient.setPartialTick(event.renderTickTime);
             PillarCutsceneClient.setPartialTick(event.renderTickTime);
+            EndingClient.setPartialTick(event.renderTickTime);
         }
 
         @SubscribeEvent
@@ -89,6 +91,7 @@ public final class ClientEvents {
             // Kamera cutscene menggantikan kamera player sepenuhnya
             if (PortalCutsceneClient.applyCamera(event)) return;
             if (PillarCutsceneClient.applyCamera(event)) return;
+            if (EndingClient.applyCamera(event)) return;
             if (ClientState.lockedYaw == null) return;
             Minecraft mc = Minecraft.getInstance();
             if (mc.options.getCameraType().isFirstPerson()) {
@@ -130,14 +133,14 @@ public final class ClientEvents {
         public static void onRenderPlayerPre(RenderPlayerEvent.Pre event) {
             // Cutscene portal: badan digambar di posisi animasinya, bayangan di tanah disembunyikan
             EntityRendererAccessor renderer = (EntityRendererAccessor) event.getRenderer();
-            if (PortalCutsceneClient.hidesShadow(event.getEntity())) {
+            if (PortalCutsceneClient.hidesShadow(event.getEntity()) || EndingClient.hidesShadow(event.getEntity())) {
                 hiddenShadows.putIfAbsent(event.getRenderer(), renderer.avalon$getShadowRadius());
                 renderer.avalon$setShadowRadius(0f);
             } else {
                 Float original = hiddenShadows.remove(event.getRenderer());
                 if (original != null) renderer.avalon$setShadowRadius(original);
             }
-            if (!PortalCutsceneClient.isVisible(event.getEntity())) {
+            if (!PortalCutsceneClient.isVisible(event.getEntity()) || !EndingClient.isVisible(event.getEntity())) {
                 // Sudah masuk portal. Batalkan sebelum pushPose: Post tidak dipanggil untuk render yang batal.
                 event.setCanceled(true);
                 return;
@@ -146,6 +149,7 @@ public final class ClientEvents {
             float s = ClientState.getScale(event.getEntity().getId());
             event.getPoseStack().pushPose();
             PortalCutsceneClient.applyTransform(event.getEntity(), event.getPoseStack(), event.getPartialTick());
+            EndingClient.applyTransform(event.getEntity(), event.getPoseStack(), event.getPartialTick());
             if (s != 1.0f) {
                 event.getPoseStack().scale(s, s, s);
             }
@@ -164,6 +168,8 @@ public final class ClientEvents {
                 event.setFOV(PortalCutsceneClient.fov());
             } else if (PillarCutsceneClient.hasCamera()) {
                 event.setFOV(PillarCutsceneClient.fov());
+            } else if (EndingClient.hasCamera()) {
+                event.setFOV(EndingClient.fov());
             }
         }
 
@@ -175,18 +181,22 @@ public final class ClientEvents {
             KingRouletteClient.render(event);
             CrownClient.render(event);
             PillarOrbRenderer.render(event);
+            GateRenderer.render(event);
+            EndingClient.render(event);
         }
 
         /** Kamera cutscene bukan dari mata player: tangan first person jangan ikut digambar. */
         @SubscribeEvent
         public static void onRenderHand(RenderHandEvent event) {
-            if (PortalCutsceneClient.hasCamera() || PillarCutsceneClient.hasCamera()) event.setCanceled(true);
+            if (PortalCutsceneClient.hasCamera() || PillarCutsceneClient.hasCamera() || EndingClient.hasCamera()) {
+                event.setCanceled(true);
+            }
         }
 
         /** Sembunyikan seluruh HUD (hotbar, crosshair, chat, ...) selama menonton cutscene. */
         @SubscribeEvent
         public static void onRenderOverlay(RenderGuiOverlayEvent.Pre event) {
-            if (PortalCutsceneClient.hasCamera() || PillarCutsceneClient.hasCamera()) {
+            if (PortalCutsceneClient.hasCamera() || PillarCutsceneClient.hasCamera() || EndingClient.hasCamera()) {
                 event.setCanceled(true);
                 return;
             }
@@ -231,6 +241,7 @@ public final class ClientEvents {
             RoleShuffleClient.renderOverlay(event.getGuiGraphics(), width, height, event.getPartialTick());
             PortalCutsceneClient.renderOverlay(event.getGuiGraphics(), width, height);
             PillarCutsceneClient.renderOverlay(event.getGuiGraphics(), width, height);
+            EndingClient.renderOverlay(event.getGuiGraphics(), width, height);
         }
 
         /** Sisa layar putih memudar di atas layar loading Avalon. */
@@ -242,7 +253,9 @@ public final class ClientEvents {
 
         @SubscribeEvent
         public static void onRenderNameTag(RenderNameTagEvent event) {
-            if (PortalCutsceneClient.isActor(event.getEntity())) event.setResult(Event.Result.DENY);
+            if (PortalCutsceneClient.isActor(event.getEntity()) || EndingClient.isActor(event.getEntity())) {
+                event.setResult(Event.Result.DENY);
+            }
         }
 
         // ── Layar loading dimensi Avalon ──────────────────────────────────────
@@ -273,6 +286,7 @@ public final class ClientEvents {
             CrownClient.set("", -1, false);
             PillarOrbRenderer.clear();
             PillarCutsceneClient.reset();
+            EndingClient.reset();
             ClientState.reset();
         }
     }

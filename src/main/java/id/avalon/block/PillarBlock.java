@@ -36,6 +36,11 @@ public class PillarBlock extends BaseEntityBlock {
     public static final int IGNITE_TICKS = 50;
     /** Saat bola yang meluap pecah, dihitung dari awal {@link #overload}. */
     public static final int OVERLOAD_BURST_TICK = 115;
+    /**
+     * Pilar yang sudah menyala saat {@link #overload} dipanggil melompati bagian tiang naik & bola
+     * terbentuk: animasinya mulai dari tick ini, jadi bolanya langsung memerah lalu pecah.
+     */
+    public static final int OVERLOAD_LIT_SKIP = RISE_TICKS + 18;
     /** Lama seluruh animasi meluap; setelah itu pilar kembali mati. */
     public static final int OVERLOAD_TICKS = 155;
 

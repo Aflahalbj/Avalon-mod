@@ -6,6 +6,7 @@ import id.avalon.commands.AvalonCommands;
 import id.avalon.core.AvalonLog;
 import id.avalon.core.PlayerScale;
 import id.avalon.core.Scheduler;
+import id.avalon.cutscene.EndingCutscene;
 import id.avalon.cutscene.PortalCutscene;
 import id.avalon.entity.MannequinEntity;
 import id.avalon.entity.ModEntities;
@@ -154,6 +155,7 @@ public class AvalonMod {
         }
         Scheduler.clear();
         PortalCutscene.reset();
+        EndingCutscene.reset();
         PlayerScale.clear();
         AvalonLog.info("Avalon mod disabled!");
     }

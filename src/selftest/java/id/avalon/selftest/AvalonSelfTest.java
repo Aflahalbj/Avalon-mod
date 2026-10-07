@@ -5,6 +5,7 @@ import id.avalon.block.BatteryRackBlock;
 import id.avalon.block.ModBlocks;
 import id.avalon.block.PillarBlock;
 import id.avalon.core.AvalonDimensions;
+import id.avalon.core.AvalonDimensions;
 import id.avalon.core.PlayerScale;
 import id.avalon.gui.AvalonMenu;
 import id.avalon.gui.TeamSelectionGUI;
@@ -18,6 +19,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.projectile.Arrow;
@@ -346,6 +348,7 @@ public final class AvalonSelfTest {
         List<String> team = gm().getCurrentMissionTeam();
         for (int i = 0; i < team.size(); i++) {
             ServerPlayer member = p(team.get(i));
+            if (member == null) continue;
             if (!holdsBattery(member)) clickRack(member, sourceRack(i), 3);
             check(holdsBattery(member), team.get(i) + " mengambil baterai dari gudang");
             clickRack(member, pillarRack(site), firstSlot(pillarRack(site), BatteryRackBlock.Slot.EMPTY));
@@ -633,6 +636,9 @@ public final class AvalonSelfTest {
             clickRack(member, pillarRack(0), slot);
             check(!holdsBattery(member) && slotState(pillarRack(0), slot) == BatteryRackBlock.Slot.BATTERY,
                     "baterai terpasang di rak pilar 0");
+            check(BatteryRackBlock.openSlots(avalon().getBlockState(pillarRack(1))) == 0
+                    && BatteryRackBlock.openSlots(avalon().getBlockState(pillarRack(2))) == 0,
+                    "pilar lain ditutup setelah baterai pertama dipasang");
             clickRack(member, sourceRack(1), 0);
             check(!holdsBattery(member), "tidak bisa mengambil baterai kedua dari gudang");
             clickRack(mate, pillarRack(0), slot);
@@ -642,6 +648,13 @@ public final class AvalonSelfTest {
             clickRack(member, pillarRack(0), slot);
             check(holdsBattery(member), "baterai sendiri bisa diambil lagi dari rak pilar");
             check(gm().isMissionActive(), "misi belum selesai");
+        });
+        sleep(2);
+        run("pilar lain dibuka lagi & misi 1 diselesaikan di pilar 1", () -> {
+            List<String> team = gm().getCurrentMissionTeam();
+            ServerPlayer member = p(team.get(0));
+            check(BatteryRackBlock.openSlots(avalon().getBlockState(pillarRack(1))) == team.size(),
+                    "pilar lain dibuka lagi setelah rak pilar 0 kosong");
 
             // Blok tidak bisa dihancurkan
             BlockPos other = member.blockPosition().below();
@@ -659,18 +672,21 @@ public final class AvalonSelfTest {
             // Cutscene pilar: semua player diparkir di atas pilar, tak terlihat & terkunci
             for (String n : NAMES) {
                 ServerPlayer pl = p(n);
-                check(pl.isInvisible() && gm().isMovementLocked(pl) && pl.serverLevel() == avalon()
+                check(pl.hasEffect(MobEffects.INVISIBILITY) && gm().isMovementLocked(pl) && pl.serverLevel() == avalon()
                         && pl.getY() > pillar(1).getY() + PillarBlock.ORB_HEIGHT, n + " diparkir untuk cutscene pilar");
             }
             check(!PillarBlock.isLit(avalon(), pillar(1)), "pilar belum menyala saat cutscene baru mulai");
         });
         waitFor("pilar 1 mulai menyala", () -> PillarBlock.isLit(avalon(), pillar(1)), 80);
+        run("cek player tetap tak terlihat selama cutscene", () -> {
+            for (String n : NAMES) check(p(n).isInvisible(), n + " tak terlihat selama cutscene pilar");
+        });
         waitFor("misi 1 sukses", () -> !gm().isMissionActive(), 320);
         run("cek pilar setelah misi 1", () -> {
             check(PillarBlock.isLit(avalon(), pillar(1)), "pilar 1 tetap menyala");
             for (String n : NAMES) {
                 ServerPlayer pl = p(n);
-                check(!pl.isInvisible() && !pl.getAbilities().flying, n + " kembali normal setelah cutscene");
+                check(!pl.hasEffect(MobEffects.INVISIBILITY) && !pl.getAbilities().flying, n + " kembali normal setelah cutscene");
             }
             for (int i = 0; i < AvalonPillars.SITES.size(); i++) {
                 BlockState rack = avalon().getBlockState(pillarRack(i));
@@ -749,13 +765,54 @@ public final class AvalonSelfTest {
             waitFor("voting misi " + round, () -> vm().isVotingActive(), 200);
             run("setuju misi " + round, () -> everyoneVotes(VotingManager.VOTE_SETUJU));
             waitFor("misi " + round + " aktif", () -> gm().isMissionActive(), 200);
+            final String[] offline = new String[1];
+            if (m == 0) {
+                run("anggota tim disconnect di tengah misi", () -> {
+                    // Bukan "c": fake player yang sudah pernah reconnect tercatat di dimensi lain
+                    for (String n : gm().getCurrentMissionTeam()) if (!n.equals("c")) offline[0] = n;
+                    cmd("fakeplayer remove " + offline[0]);
+                });
+                waitFor("bot menggantikan", () -> p(offline[0]) == null && gm().getOfflineMannequinCount() == 1, 100);
+            }
+            if (m == 1) {
+                final Vec3[] botAt = new Vec3[1];
+                run("anggota tim disconnect (akan kembali di tengah misi)", () -> {
+                    for (String n : gm().getCurrentMissionTeam()) if (!n.equals("c")) offline[0] = n;
+                    cmd("fakeplayer remove " + offline[0]);
+                });
+                waitFor("bot mengambil baterai", () -> gm().getBatteryMission().botCarriesBattery(offline[0]), 3000);
+                run("anggota tim reconnect di tengah misi", () -> {
+                    botAt[0] = gm().getBatteryMission().botPosition(offline[0]);
+                    cmd("fakeplayer spawn " + offline[0]);
+                });
+                waitFor("kembali ke misi", () -> p(offline[0]) != null && gm().getOfflineMannequinCount() == 0, 200);
+                sleep(5);
+                run("cek player menggantikan bot-nya", () -> {
+                    ServerPlayer back = p(offline[0]);
+                    check(holdsBattery(back), "baterai yang diambil bot pindah ke tangan player");
+                    check(!onSeat(back) && back.gameMode.getGameModeForPlayer() == GameType.SURVIVAL, "player berdiri, bukan duduk");
+                    check(back.serverLevel() == avalon() && back.position().distanceTo(botAt[0]) < 3.0,
+                            "player muncul di posisi terakhir bot");
+                    offline[0] = null;
+                });
+            }
             run("pasang baterai misi " + round, () -> {
                 site[0] = openSite();
                 check(site[0] >= 0 && site[0] != 1, "pilar yang belum menyala dibuka lagi (pilar " + site[0] + ")");
                 teamFillsPillar(site[0]);
+                if (offline[0] != null) check(gm().getBatteryMission().isActive(), "misi menunggu baterai bot");
             });
+            if (m == 0) {
+                waitFor("bot mengambil & memasang baterainya", () -> !gm().getBatteryMission().isActive(), 6000);
+                run("cek rak setelah bot memasang", () ->
+                        check(BatteryRackBlock.isFull(avalon().getBlockState(pillarRack(site[0]))), "rak pilar penuh berkat bot"));
+            }
             waitFor("misi " + round + " sukses", () -> !gm().isMissionActive(), 320);
             run("cek pilar misi " + round, () -> check(PillarBlock.isLit(avalon(), pillar(site[0])), "pilar " + site[0] + " menyala"));
+            if (m == 0) {
+                run("anggota tim reconnect", () -> cmd("fakeplayer spawn " + offline[0]));
+                waitFor("kembali & mannequin hilang", () -> p(offline[0]) != null && gm().getOfflineMannequinCount() == 0, 200);
+            }
             if (m == 0) {
                 waitFor("diskusi", () -> gm().isDiscussionActive(), 600);
                 run("skip diskusi", AvalonSelfTest::everyoneSkips);
@@ -801,9 +858,13 @@ public final class AvalonSelfTest {
             arrow.shoot(dir.x, dir.y, dir.z, 2.0f, 0f);
             level.addFreshEntity(arrow);
         });
-        waitFor("game selesai (kubu jahat menang)", () -> !gm().isGameRunning(), 400);
+        waitFor("game selesai (kubu jahat menang)", () -> !gm().isGameRunning(), 1200);
         run("cek cleanup", () -> {
-            ServerLevel level = p("a").serverLevel();
+            // Game berlangsung di dimensi Avalon; setelah selesai semua player dipulangkan ke overworld
+            ServerLevel level = server.getLevel(AvalonDimensions.AVALON);
+            for (String n : NAMES) {
+                check(p(n).serverLevel() == server.overworld(), n + " dipulangkan ke overworld");
+            }
             check(level.getBlockState(new BlockPos(gm().BASE_X, gm().BASE_Y, gm().BASE_Z)).isAir(), "cauldron dihapus");
             check(level.getBlockState(new BlockPos(gm().BASE_X, gm().BASE_Y - 1, gm().BASE_Z)).is(Blocks.CHISELED_STONE_BRICKS),
                     "campfire diganti chiseled stone bricks");

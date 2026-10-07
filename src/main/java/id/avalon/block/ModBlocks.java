@@ -37,7 +37,10 @@ public final class ModBlocks {
             BLOCK_ENTITIES.register("battery_rack",
                     () -> BlockEntityType.Builder.of(BatteryRackBlockEntity::new, BATTERY_RACK.get()).build(null));
 
-    public static final RegistryObject<Item> BATTERY = ITEMS.register("battery",
+    /** Isi portal raksasa di cutscene akhir; tidak punya item (hanya dipasang oleh kode). */
+    public static final RegistryObject<GateBlock> GATE = BLOCKS.register("gate", GateBlock::new);
+
+    public static final RegistryObject<Item> BATTERY =ITEMS.register("battery",
             () -> new Item(new Item.Properties().stacksTo(16)));
 
     private ModBlocks() {}

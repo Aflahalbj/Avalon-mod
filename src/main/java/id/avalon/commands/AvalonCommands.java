@@ -34,6 +34,8 @@ public final class AvalonCommands {
         GotoCommand.register(sub, gameManager);
         StartGameCommand.register(sub, gameManager);
         DebugRolesCommand.register(sub, gameManager);
+        SetRoleCommand.register(sub, gameManager);
+        DebugCommand.register(sub, gameManager);
         StopGameCommand.register(sub, gameManager);
         SetTimerCommand.register(sub, gameManager);
 

@@ -70,6 +70,10 @@ public final class AvalonNetwork {
                 RackClick::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         CHANNEL.registerMessage(id++, PillarCutscene.class, PillarCutscene::encode, PillarCutscene::decode,
                 PillarCutscene::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(id++, EndingStart.class, EndingStart::encode, EndingStart::decode,
+                EndingStart::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(id++, EndingStop.class, EndingStop::encode, EndingStop::decode,
+                EndingStop::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     // ── Helpers kirim ─────────────────────────────────────────────────────────
@@ -312,6 +316,67 @@ public final class AvalonNetwork {
         static void handle(KingRoulette m, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> () -> id.avalon.client.ClientPacketHandler.kingRoulette(m)));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    /** Satu player di cutscene akhir: kubunya, gaya berpamitannya, dan urutannya di kubunya. */
+    public record EndingActor(int entityId, boolean good, int style, int order) {
+        static void encode(FriendlyByteBuf buf, EndingActor a) {
+            buf.writeInt(a.entityId);
+            buf.writeBoolean(a.good);
+            buf.writeVarInt(a.style);
+            buf.writeVarInt(a.order);
+        }
+
+        static EndingActor decode(FriendlyByteBuf buf) {
+            return new EndingActor(buf.readInt(), buf.readBoolean(), buf.readVarInt(), buf.readVarInt());
+        }
+    }
+
+    /**
+     * Mulai cutscene akhir game (lihat EndingTimeline): jenisnya, lamanya, jumlah player kubu baik,
+     * entity Merlin & assassin (-1 = tidak ada), pilar mana saja yang sedang menyala (indeks AvalonPillars.SITES),
+     * dan daftar player yang tampil.
+     */
+    public record EndingStart(int type, int total, int goodCount, int merlinId, int assassinId,
+                              List<Integer> litPillars, List<EndingActor> actors) {
+        static void encode(EndingStart m, FriendlyByteBuf buf) {
+            buf.writeVarInt(m.type);
+            buf.writeVarInt(m.total);
+            buf.writeVarInt(m.goodCount);
+            buf.writeInt(m.merlinId);
+            buf.writeInt(m.assassinId);
+            buf.writeCollection(m.litPillars, FriendlyByteBuf::writeVarInt);
+            buf.writeCollection(m.actors, EndingActor::encode);
+        }
+
+        static EndingStart decode(FriendlyByteBuf buf) {
+            return new EndingStart(buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readInt(), buf.readInt(),
+                    buf.readList(FriendlyByteBuf::readVarInt), buf.readList(EndingActor::decode));
+        }
+
+        static void handle(EndingStart m, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> () -> id.avalon.client.ClientPacketHandler.endingStart(m)));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    /** Akhiri cutscene akhir game di client. */
+    public record EndingStop() {
+        public static final EndingStop INSTANCE = new EndingStop();
+
+        static void encode(EndingStop m, FriendlyByteBuf buf) {
+        }
+
+        static EndingStop decode(FriendlyByteBuf buf) {
+            return INSTANCE;
+        }
+
+        static void handle(EndingStop m, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> () -> id.avalon.client.ClientPacketHandler.endingStop()));
             ctx.get().setPacketHandled(true);
         }
     }

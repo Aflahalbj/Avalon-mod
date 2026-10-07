@@ -9,23 +9,25 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.HumanoidArm;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
-import java.util.Collections;
 
 /**
  * Entity mirip player (pengganti org.bukkit.entity.Mannequin di Paper 1.21).
  * Dipakai untuk Ratu Amaryn (tidur) dan "Bot" player yang sedang offline.
+ * Bawaannya patung: diam, kebal, tidak bisa didorong. {@link #setWalking} membuatnya bisa berjalan
+ * sendiri (dipakai bot yang ikut misi).
  */
-public class MannequinEntity extends LivingEntity {
+public class MannequinEntity extends PathfinderMob {
 
     private static final EntityDataAccessor<CompoundTag> DATA_PROFILE =
             SynchedEntityData.defineId(MannequinEntity.class, EntityDataSerializers.COMPOUND_TAG);
@@ -38,14 +40,38 @@ public class MannequinEntity extends LivingEntity {
     @Nullable
     private CompoundTag cachedProfileTag;
 
+    /** Sedang berjalan sendiri (AI & gravitasi aktif); false = patung. */
+    private boolean walking;
+
     public MannequinEntity(EntityType<? extends MannequinEntity> type, Level level) {
         super(type, level);
         this.setNoGravity(true);
         this.setInvulnerable(true);
+        this.setNoAi(true);
+        this.setPersistenceRequired();
     }
 
     public static AttributeSupplier.Builder createAttributes() {
-        return LivingEntity.createLivingAttributes();
+        // Kecepatan jalan sama dengan player; jangkauan pathfinding jauh (gudang ke pilar)
+        return Mob.createMobAttributes()
+                .add(Attributes.MOVEMENT_SPEED, 0.1)
+                .add(Attributes.FOLLOW_RANGE, 128.0);
+    }
+
+    /** Hidupkan / matikan kemampuan berjalan. Saat dimatikan ia kembali jadi patung di tempatnya. */
+    public void setWalking(boolean walking) {
+        this.walking = walking;
+        this.setNoAi(!walking);
+        this.setNoGravity(!walking);
+        this.noPhysics = false;
+        if (!walking) {
+            this.getNavigation().stop();
+            this.setDeltaMovement(Vec3.ZERO);
+        }
+    }
+
+    public boolean isWalking() {
+        return walking;
     }
 
     @Override
@@ -117,26 +143,24 @@ public class MannequinEntity extends LivingEntity {
 
     @Override
     public void travel(Vec3 input) {
-        // Immovable: tidak bergerak sama sekali
+        // Patung tidak bergerak sama sekali. Di client tetap dijalankan: di sana ini hanya
+        // menghitung animasi langkah dari perpindahan posisinya.
+        if (walking || level().isClientSide) super.travel(input);
+    }
+
+    @Override
+    public boolean removeWhenFarAway(double distance) {
+        return false;
+    }
+
+    @Override
+    public boolean canBeLeashed(Player player) {
+        return false;
     }
 
     @Override
     public boolean isAffectedByPotions() {
         return false;
-    }
-
-    @Override
-    public Iterable<ItemStack> getArmorSlots() {
-        return Collections.emptyList();
-    }
-
-    @Override
-    public ItemStack getItemBySlot(EquipmentSlot slot) {
-        return ItemStack.EMPTY;
-    }
-
-    @Override
-    public void setItemSlot(EquipmentSlot slot, ItemStack stack) {
     }
 
     @Override
@@ -168,5 +192,6 @@ public class MannequinEntity extends LivingEntity {
         }
         this.setNoGravity(true);
         this.setInvulnerable(true);
+        this.setNoAi(true);
     }
 }

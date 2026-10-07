@@ -27,6 +27,9 @@ Sama persis dengan plugin. Semua butuh OP (permission level 2), kecuali `/avalon
 | `/avalon cutscene <on\|off>` | cutscene pembuka: `on` = player tersedot portal lalu masuk dimensi Avalon, `off` = langsung dipindahkan |
 | `/avalon cutscene portal play [animasi]` | tes cutscene portal: portal terbuka di arah pandangmu, semua player dalam 32 blok tersedot (tanpa pindah dimensi). `animasi` = satu gaya untuk semua player: `baling`, `keseret`, `salto`, `superman`, `ngelawan`, `spiral`, `ragdoll`, `kejerat`; tanpa argumen gayanya acak |
 | `/avalon cutscene portal stop` | batalkan cutscene portal |
+| `/avalon cutscene ending <menang\|kalah\|merlin>` | tes cutscene akhir game tanpa bermain (harus di dimensi Avalon, di luar game). Semua player di dimensi itu ikut tampil; kubunya dibagi bergantian, pengirim = kubu baik / Merlin |
+| `/avalon cutscene ending kalah <0-3>` | sama, tapi nyalakan dulu sejumlah pilar itu: di ending kalah hanya bola pilar yang menyala yang meledak (0 = langsung ke sorotan kubu jahat) |
+| `/avalon cutscene ending stop` | batalkan cutscene akhir |
 | `/avalon roleinfo [role]` | info role sendiri / role tertentu |
 | `/avalon queen <spawn\|delete>` | Ratu Amaryn (mannequin tidur) |
 | `/avalon gotoavalon [player]` | pindah ke titik datang dimensi Avalon (`-422 191 -496`, di depan portal); `player` boleh nama atau selector (`@a`, `@s`, ...), kosong = diri sendiri |
@@ -34,6 +37,8 @@ Sama persis dengan plugin. Semua butuh OP (permission level 2), kecuali `/avalon
 | `/avalon startgame` | mulai game (5-10 player online): semua player dibawa ke kursinya di dimensi Avalon (`-422 192 -510`, menghadap tengah), animasi buka mata, lalu game berjalan |
 | `/avalon stopgame` | hentikan game, player tetap terdaftar |
 | `/avalon debugroles` | lihat role semua player |
+| `/avalon setrole <player> <role\|acak>` | pastikan player terdaftar mendapat role itu di game berikutnya. Hanya role yang aktif untuk jumlah player terdaftar (default / hasil `customrole`), dan tidak bisa dobel kecuali role yang memang ada beberapa (Loyal Servant, Minion). Tanpa argumen: daftar yang sudah diatur |
+| `/avalon debug alwaysking <player\|off>` | tes: player itu selalu jadi raja (raja tidak bergilir) |
 | `/avalon settimer <reveal\|voting\|discuss\|evildiscuss> <detik>` | ubah timer |
 
 ## Padanan fitur Paper → Forge

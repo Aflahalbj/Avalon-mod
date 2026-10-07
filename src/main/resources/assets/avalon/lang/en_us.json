@@ -2,5 +2,6 @@
   "entity.avalon.mannequin": "Mannequin",
   "block.avalon.pillar": "Mission Pillar",
   "block.avalon.battery_rack": "Battery Rack",
+  "block.avalon.gate": "Avalon Gate",
   "item.avalon.battery": "Battery"
 }

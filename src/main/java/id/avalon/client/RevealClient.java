@@ -149,7 +149,7 @@ public final class RevealClient {
      * selubung api berbentuk tetesan terbalik dengan tepi terang yang bergolak, dua lapis
      * yang berkedip bergantian, plus lidah-lidah api yang naik dari bawah.
      */
-    private static void aura(Matrix4f m, float t, float alpha, boolean isRed) {
+    static void aura(Matrix4f m, float t, float alpha, boolean isRed) {
         float r = isRed ? 1.0f : 0.72f;
         float g = isRed ? 0.18f : 0.30f;
         float b = isRed ? 0.12f : 1.0f;
