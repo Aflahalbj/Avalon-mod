@@ -51,9 +51,8 @@ public class CutsceneListener {
         if (!gm.isGameRunning())
             return;
 
-        // Izinkan eject kalau game manager sedang dalam fase reveal
-        // (supaya standAsViewer() dan standAsTarget() bisa eject player)
-        if (gm.isRevealPhaseActive())
+        // Game sendiri yang sedang menurunkannya (lihat GameManager#releaseFromSeat)
+        if (gm.isDismountAllowed())
             return;
 
         event.setCanceled(true);

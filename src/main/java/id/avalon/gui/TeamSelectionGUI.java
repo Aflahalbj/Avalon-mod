@@ -4,9 +4,11 @@ import id.avalon.core.AvalonItems;
 import id.avalon.core.Txt;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraftforge.server.ServerLifecycleHooks;
 
 import java.util.List;
 
@@ -119,15 +121,33 @@ public class TeamSelectionGUI {
         return skull;
     }
 
-    /** Kepala player — nama disimpan di tag dan di display name. */
+    /**
+     * Kepala player — nama disimpan di tag dan di display name. Player yang sedang offline diberi
+     * tanda: ia hanya bisa dipilih kalau player yang online tidak cukup (lihat TeamSelectionListener).
+     */
     public ItemStack makePlayerHead(String playerName) {
         ItemStack skull = AvalonItems.playerHead(playerName);
-        AvalonItems.setName(skull, Txt.t(playerName, ChatFormatting.AQUA, ChatFormatting.BOLD));
-        AvalonItems.setLore(skull, List.of(
-            Txt.t("Klik untuk memilih / mengembalikan", ChatFormatting.GRAY)
-        ));
+        if (isOffline(playerName)) {
+            AvalonItems.setName(skull, Txt.t(playerName, ChatFormatting.GRAY, ChatFormatting.BOLD)
+                .append(Txt.t(" (OFFLINE)", ChatFormatting.RED)));
+            AvalonItems.setLore(skull, List.of(
+                Txt.t("Sedang offline.", ChatFormatting.RED),
+                Txt.t("Hanya bisa dipilih kalau player yang", ChatFormatting.GRAY),
+                Txt.t("online tidak cukup untuk mengisi tim.", ChatFormatting.GRAY)
+            ));
+        } else {
+            AvalonItems.setName(skull, Txt.t(playerName, ChatFormatting.AQUA, ChatFormatting.BOLD));
+            AvalonItems.setLore(skull, List.of(
+                Txt.t("Klik untuk memilih / mengembalikan", ChatFormatting.GRAY)
+            ));
+        }
         AvalonItems.setTag(skull, PDC_KEY_PLAYER_NAME, playerName);
         return skull;
+    }
+
+    private static boolean isOffline(String playerName) {
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        return server != null && server.getPlayerList().getPlayerByName(playerName) == null;
     }
 
     /** Checkmark skull dengan texture kustom. */

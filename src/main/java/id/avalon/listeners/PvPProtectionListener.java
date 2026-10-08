@@ -8,6 +8,10 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
+/**
+ * Selama game, pemain game tidak bisa melukai maupun dilukai player lain.
+ * Player di luar game (dan semua orang saat tidak ada game) mengikuti setelan PvP server.
+ */
 public class PvPProtectionListener {
 
     private final GameManager gameManager;
@@ -19,34 +23,29 @@ public class PvPProtectionListener {
     @SubscribeEvent
     public void onDamage(LivingAttackEvent event) {
 
-        if (!(event.getEntity() instanceof Player))
+        if (!(event.getEntity() instanceof Player victim))
             return;
 
-        if (event.getEntity().level().isClientSide)
+        if (victim.level().isClientSide)
             return;
 
         Entity damager = event.getSource().getDirectEntity();
         if (damager == null)
             return;
 
-        // Arrow assassin boleh lewat
+        // Arrow assassin boleh lewat (damage-nya sendiri dibatalkan AssassinationListener)
         if (damager instanceof AbstractArrow arrow) {
             if (gameManager.isAssassinArrow(arrow)) {
                 return;
             }
         }
 
-        // Semua pukulan player diblok
-        if (damager instanceof Player) {
-            event.setCanceled(true);
+        Entity attacker = damager instanceof Projectile projectile ? projectile.getOwner() : damager;
+        if (!(attacker instanceof Player attackingPlayer))
             return;
-        }
 
-        // Semua projectile player diblok
-        if (damager instanceof Projectile projectile) {
-            if (projectile.getOwner() instanceof Player) {
-                event.setCanceled(true);
-            }
+        if (gameManager.isOneSlot(victim) || gameManager.isOneSlot(attackingPlayer)) {
+            event.setCanceled(true);
         }
     }
 }

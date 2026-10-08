@@ -123,8 +123,14 @@ public final class EndingCutscene {
             // di antara kursi dan portal.
             seatAll(good, evil);
             tasks.add(Scheduler.later(EndingTimeline.FAREWELL_MOVE_AT, () -> {
-                for (int i = 0; i < good.size(); i++) place(good.get(i), stairSpot(i), false);
-                for (int i = 0; i < evil.size(); i++) place(evil.get(i), midSpot(i, evil.size()), true);
+                for (int i = 0; i < good.size(); i++) {
+                    ServerPlayer p = live(good.get(i));
+                    if (p != null) place(p, stairSpot(i), false);
+                }
+                for (int i = 0; i < evil.size(); i++) {
+                    ServerPlayer p = live(evil.get(i));
+                    if (p != null) place(p, midSpot(i, evil.size()), true);
+                }
             }));
         }
 
@@ -234,9 +240,14 @@ public final class EndingCutscene {
             p.setGameMode(GameType.ADVENTURE);
             p.removeEffect(MobEffects.INVISIBILITY);
             p.removeEffect(MobEffects.BLINDNESS);
-            game.seatForCutscene(p, seatOf[i]);
+            game.seatPlayerAt(p, seatOf[i]);
             seated.add(p);
         }
+    }
+
+    /** Objek player yang berlaku sekarang (ia bisa keluar-masuk sejak cutscene dimulai); null kalau offline. */
+    private static ServerPlayer live(ServerPlayer p) {
+        return game == null ? null : game.getPlayer(p.getUUID());
     }
 
     /** Taruh player berdiri di {@code at}, menghadap (atau membelakangi) portal, tidak bisa bergerak. */
@@ -302,15 +313,20 @@ public final class EndingCutscene {
     /** Bebaskan para player dan akhiri cutscene di client. */
     private static void finish() {
         if (!running) return;
-        for (ServerPlayer p : locked) game.unlockMovement(p);
+        for (ServerPlayer p : locked) {
+            ServerPlayer now = live(p);
+            game.unlockMovement(now != null ? now : p);
+        }
         // Dihentikan sebelum perpisahan: yang masih duduk diturunkan dari kursi cutscene-nya
         for (ServerPlayer p : seated) {
-            if (!locked.contains(p)) game.releaseFromSeat(p);
+            ServerPlayer now = live(p);
+            if (now != null && !locked.contains(now)) game.releaseFromSeat(now);
         }
         // Busur reka ulang (tes di luar game; di dalam game inventory dibereskan cleanup)
-        if (bowHolder != null) {
-            bowHolder.getInventory().clearOrCountMatchingItems(stack -> stack.is(Items.BOW), -1,
-                    bowHolder.inventoryMenu.getCraftSlots());
+        ServerPlayer bow = bowHolder == null ? null : live(bowHolder);
+        if (bow != null) {
+            bow.getInventory().clearOrCountMatchingItems(stack -> stack.is(Items.BOW), -1,
+                    bow.inventoryMenu.getCraftSlots());
         }
         if (seatsBorrowed && level != null) {
             AvalonSeats.sync(level.getServer(), game.getRegisteredPlayers().size());

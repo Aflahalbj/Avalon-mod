@@ -6,21 +6,20 @@ import id.avalon.managers.GameManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
-import net.minecraft.server.level.ServerPlayer;
 
 public class StopGameCommand {
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher, GameManager gameManager) {
         dispatcher.register(Commands.literal("stopgame")
             .requires(AvalonCommands::isAdmin)
+            // Boleh dari console: game yang macet tetap bisa dihentikan walau tidak ada OP yang online
             .executes(ctx -> {
                 CommandSourceStack sender = ctx.getSource();
-                if (!(sender.getEntity() instanceof ServerPlayer player)) {
-                    sender.sendSystemMessage(Txt.t("Harus dijalankan oleh player!", ChatFormatting.RED));
-                    return 1;
+                if (gameManager.stopGame()) {
+                    sender.sendSystemMessage(Txt.t("Game berhasil dihentikan. Player masih terdaftar.", ChatFormatting.GREEN));
+                } else {
+                    sender.sendSystemMessage(Txt.t("Tidak ada game yang berjalan!", ChatFormatting.RED));
                 }
-
-                gameManager.stopGame(player);
                 return 1;
             }));
     }

@@ -28,26 +28,28 @@ public class CommandBlockListener {
     @SubscribeEvent
     public void onCommand(CommandEvent event) {
 
-        if (!gm.isGameRunning()) {
+        // Hanya command dari player (setara PlayerCommandPreprocessEvent)
+        if (!(event.getParseResults().getContext().getSource().getEntity() instanceof ServerPlayer player)) {
             return;
         }
 
-        // Hanya command dari player (setara PlayerCommandPreprocessEvent)
-        if (!(event.getParseResults().getContext().getSource().getEntity() instanceof ServerPlayer player)) {
+        // Hanya pemain game selama game berjalan; player lain di server bebas berkirim pesan
+        if (!gm.isOneSlot(player)) {
             return;
         }
 
         String cmd = event.getParseResults().getReader().getString().toLowerCase(Locale.ROOT);
         if (cmd.startsWith("/")) cmd = cmd.substring(1);
 
-        for (String blocked : BLOCKED) {
-            if (cmd.equals(blocked) || cmd.startsWith(blocked + " ")) {
-                event.setCanceled(true);
-                player.sendSystemMessage(
-                        Txt.t("Ciee mau kirim pesan ke siapa tuh.", ChatFormatting.RED)
-                );
-                return;
-            }
+        // Nama command-nya saja, tanpa namespace (/minecraft:msg sama dengan /msg)
+        String name = cmd.split(" ", 2)[0];
+        name = name.substring(name.indexOf(':') + 1);
+
+        if (BLOCKED.contains(name)) {
+            event.setCanceled(true);
+            player.sendSystemMessage(
+                    Txt.t("Ciee mau kirim pesan ke siapa tuh.", ChatFormatting.RED)
+            );
         }
     }
 }

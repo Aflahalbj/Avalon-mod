@@ -3,7 +3,6 @@ package id.avalon.listeners;
 import id.avalon.AvalonMod;
 import id.avalon.core.Fx;
 import id.avalon.core.Txt;
-import id.avalon.gui.TeamSelectionGUI;
 import id.avalon.managers.GameManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.server.level.ServerPlayer;
@@ -84,9 +83,14 @@ public class TeamBookListener implements ItemGuard.InventoryClickRule {
             return;
         }
 
-        int missionNumber = gameManager.getCurrentMission();
-        int playerCount   = gameManager.getRegisteredPlayers().size();
-        int teamSize      = TeamSelectionGUI.getTeamSize(playerCount, missionNumber);
+        // Buku yang tertinggal di tangan di luar fase pemilihan tim tidak boleh memulai voting baru
+        if (!gameManager.isTeamSelectionActive()) {
+            player.sendSystemMessage(Txt.t("Belum waktunya memilih tim.", ChatFormatting.RED));
+            return;
+        }
+
+        // Ukuran tim mengikuti nomor ronde (bukan jumlah misi sukses)
+        int teamSize = gameManager.getTeamSize();
 
         List<String> registered    = new ArrayList<>(gameManager.getRegisteredPlayers());
         List<String> alreadyPicked = gameManager.getTeamSelectionSession(player);

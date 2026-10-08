@@ -4,7 +4,7 @@ Port dari plugin Paper **Avalon** (`MINECRAFT/avalon-plugin`) ke mod Minecraft F
 (Forge 47.x, Java 17, official mappings, Mixin).
 
 **Wajib dipasang di server dan di semua client.** Client butuh mod ini untuk render Mannequin
-(Ratu Amaryn & "Bot" player offline), kunci kamera/gerakan, dan skala player 1.5×.
+("Bot" player offline), kunci kamera/gerakan, dan skala player 1.5×.
 
 ## Build
 
@@ -31,11 +31,10 @@ Sama persis dengan plugin. Semua butuh OP (permission level 2), kecuali `/avalon
 | `/avalon cutscene ending kalah <0-3>` | sama, tapi nyalakan dulu sejumlah pilar itu: di ending kalah hanya bola pilar yang menyala yang meledak (0 = langsung ke sorotan kubu jahat) |
 | `/avalon cutscene ending stop` | batalkan cutscene akhir |
 | `/avalon roleinfo [role]` | info role sendiri / role tertentu |
-| `/avalon queen <spawn\|delete>` | Ratu Amaryn (mannequin tidur) |
 | `/avalon gotoavalon [player]` | pindah ke titik datang dimensi Avalon (`-422 191 -496`, di depan portal); `player` boleh nama atau selector (`@a`, `@s`, ...), kosong = diri sendiri |
 | `/avalon gotoworld [player]` | pindah ke overworld (X/Z dipertahankan); argumen sama seperti di atas |
 | `/avalon startgame` | mulai game (5-10 player online): semua player dibawa ke kursinya di dimensi Avalon (`-422 192 -510`, menghadap tengah), animasi buka mata, lalu game berjalan |
-| `/avalon stopgame` | hentikan game, player tetap terdaftar |
+| `/avalon stopgame` | hentikan game dan pulangkan semua player ke tempat asalnya; player tetap terdaftar. Boleh dari console |
 | `/avalon debugroles` | lihat role semua player |
 | `/avalon setrole <player> <role\|acak>` | pastikan player terdaftar mendapat role itu di game berikutnya. Hanya role yang aktif untuk jumlah player terdaftar (default / hasil `customrole`), dan tidak bisa dobel kecuali role yang memang ada beberapa (Loyal Servant, Minion). Tanpa argumen: daftar yang sudah diatur |
 | `/avalon debug alwaysking <player\|off>` | tes: player itu selalu jadi raja (raja tidak bergilir) |
@@ -60,7 +59,14 @@ Perbaikan kecil dibanding plugin (perilaku game tetap sama):
 - Player yang dibuang dari kursi saat game **sudah selesai** boleh turun (di plugin bisa nyangkut).
 - Notifikasi "X sedang offline" di fase perkenalan benar-benar muncul (di plugin kodenya tidak pernah jalan).
 - Pengumuman role di akhir game juga menyebut player yang sedang offline.
-- Cek "semua anggota tim misi offline" dijalankan setelah player benar-benar keluar.
+- Cek "semua anggota tim misi offline" dijalankan setelah player benar-benar keluar, dan juga saat misi dimulai.
+- Ukuran tim mengikuti nomor ronde (1-5), bukan jumlah misi yang sudah sukses.
+- Player yang sedang offline tetap tampil di GUI pemilihan tim (bertanda OFFLINE), tapi hanya bisa dipilih
+  sebanyak kekurangannya kalau player yang online tidak cukup untuk mengisi tim.
+- Selama tidak ada satu pun pemain game yang online, semua timer game dibekukan dan lanjut saat ada yang masuk lagi.
+- Panah assassin yang tidak pernah mendarat (jatuh ke void) dihitung meleset.
+- Blokir PvP, fall damage, `/msg`, dan step height green wool hanya berlaku untuk pemain game selama game
+  berjalan; di luar itu server tidak disentuh. Setelan PvP server dikembalikan seperti sebelum game.
 
 ## Dimensi Avalon (`avalon:avalon`)
 

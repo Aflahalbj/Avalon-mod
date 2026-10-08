@@ -14,7 +14,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.util.Mth;
+import id.avalon.world.AvalonSeats;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import org.joml.Matrix4f;
@@ -33,7 +35,7 @@ public final class RevealClient {
     private RevealClient() {}
 
     /** Seberapa dalam kepala menunduk (radian). */
-    private static final float BOW_PITCH = 0.95f;
+    private static final float BOW_PITCH = Mth.HALF_PI;
 
     /** Bentuk aura: titik di sepanjang tepi, dan jumlah lidah api yang naik. */
     private static final int OUTLINE = 48;
@@ -81,6 +83,8 @@ public final class RevealClient {
             stop(false);
             return;
         }
+        // Mata terpejam digambar di HUD: F1 (sembunyikan HUD) tidak boleh ikut menyembunyikannya
+        if (eyesClosed) Minecraft.getInstance().options.hideGui = false;
         if (!Minecraft.getInstance().isPaused()) age++;
     }
 
@@ -88,7 +92,8 @@ public final class RevealClient {
 
     /** Dipanggil dari PlayerModelMixin: kepala semua yang tidak boleh tegak dibuat menunduk ke depan. */
     public static void poseModel(PlayerModel<?> model, Entity entity) {
-        if (!active || eyesClosed) return;
+        // Yang terpejam pun tetap melihat semua orang menunduk, kalau-kalau layarnya tertembus
+        if (!active) return;
         Minecraft mc = Minecraft.getInstance();
         if (entity == mc.player || upright.contains(entity.getId())) return;
 
@@ -97,6 +102,43 @@ public final class RevealClient {
         model.head.xRot = Mth.lerp(k, model.head.xRot, BOW_PITCH);
         model.head.yRot = Mth.lerp(k, model.head.yRot, 0f);
         model.hat.copyFrom(model.head);
+    }
+
+    // ── Menghadap tengah ──────────────────────────────────────────────────────
+
+    private static LivingEntity turned;
+    private static float bodyRot, bodyRotO, headRot, headRotO;
+
+    /**
+     * Sebelum player digambar: yang menunduk digambar menghadap tengah lingkaran kursi, apa pun arah
+     * aslinya, supaya dari luar tidak kelihatan siapa yang sedang menoleh-noleh. Hanya untuk gambar
+     * ini; rotasi aslinya dikembalikan di {@link #afterRender}.
+     */
+    public static void beforeRender(LivingEntity entity) {
+        // Render sebelumnya tidak sampai selesai (dibatalkan / error): kembalikan dulu rotasinya
+        if (turned != null) afterRender(turned);
+        if (!active) return;
+        if (entity == Minecraft.getInstance().player || upright.contains(entity.getId())) return;
+
+        double dx = AvalonSeats.CENTER.getX() + 0.5 - entity.getX();
+        double dz = AvalonSeats.CENTER.getZ() + 0.5 - entity.getZ();
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+
+        turned = entity;
+        bodyRot = entity.yBodyRot;
+        bodyRotO = entity.yBodyRotO;
+        headRot = entity.yHeadRot;
+        headRotO = entity.yHeadRotO;
+        entity.yBodyRot = entity.yBodyRotO = entity.yHeadRot = entity.yHeadRotO = yaw;
+    }
+
+    public static void afterRender(LivingEntity entity) {
+        if (turned != entity) return;
+        entity.yBodyRot = bodyRot;
+        entity.yBodyRotO = bodyRotO;
+        entity.yHeadRot = headRot;
+        entity.yHeadRotO = headRotO;
+        turned = null;
     }
 
     // ── Aura ──────────────────────────────────────────────────────────────────

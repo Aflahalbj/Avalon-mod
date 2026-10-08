@@ -190,6 +190,11 @@ public class BatteryMission implements BatteryRackBlock.Access {
         return sabotaging.contains(player.getUUID());
     }
 
+    /** Baterai player ini sedang terpasang di rak pilar (dipasang sendiri atau oleh bot-nya). */
+    public boolean hasPlaced(ServerPlayer player) {
+        return placed.containsKey(player.getUUID());
+    }
+
     /** Tandai pilar ini sudah menyala: raknya tidak dibuka lagi di misi berikutnya. */
     public void markCompleted(int site) {
         completed.add(site);
@@ -263,13 +268,13 @@ public class BatteryMission implements BatteryRackBlock.Access {
     private static final int GLIDE_TICKS = 60;
     private static final double ARRIVE_DISTANCE = 1.3;
     /**
-     * Kecepatan bot = anggota tim lain (player berjalan dengan Slowness I, ±3.7 block/detik).
+     * Kecepatan bot = anggota tim lain (player berjalan tanpa lari, ±4.3 block/detik).
      * Mob memakai atributnya dua kali (sebagai kecepatan dan sebagai dorongan maju), jadi nilai
-     * atributnya akar dari hasil kali kecepatan player (0.085) dan dorongan majunya (0.98).
+     * atributnya akar dari hasil kali kecepatan player (0.1) dan dorongan majunya (0.98).
      */
-    private static final double WALK_SPEED_ATTRIBUTE = Math.sqrt(0.085 * 0.98);
+    private static final double WALK_SPEED_ATTRIBUTE = Math.sqrt(0.1 * 0.98);
     /** Kecepatan yang sama dalam block per tick, dipakai saat bot bergerak lurus tanpa pathfinding. */
-    private static final double GLIDE_SPEED = 3.67 / 20.0;
+    private static final double GLIDE_SPEED = 4.317 / 20.0;
     /** Bot dianggap tersangkut kalau dalam satu pengecekan berpindah kurang dari ini (block). */
     private static final double STUCK_DISTANCE = 1.5;
 
@@ -343,14 +348,18 @@ public class BatteryMission implements BatteryRackBlock.Access {
     /**
      * Anggota tim kembali di tengah misi: bot-nya berhenti dan baterai yang sedang dibawa bot pindah
      * ke tangannya. Kalau dia belum punya baterai terpasang maupun di tangan, dia boleh mengambil lagi.
+     * Satu player tetap hanya punya satu baterai: yang sudah terpasang (olehnya atau oleh bot-nya)
+     * tidak boleh ditambah baterai kedua.
      */
     public void onReturn(ServerPlayer player) {
         Bot bot = bots.remove(player.getGameProfile().getName());
         UUID id = player.getUUID();
-        if (bot != null && !bot.battery.isEmpty()) {
+        if (placed.containsKey(id)) {
+            taken.add(id);
+        } else if (bot != null && !bot.battery.isEmpty()) {
             taken.add(id);
             player.getInventory().setItem(0, bot.battery);
-        } else if (!placed.containsKey(id)) {
+        } else {
             taken.remove(id);
         }
     }
@@ -394,6 +403,7 @@ public class BatteryMission implements BatteryRackBlock.Access {
                 level.setBlock(bot.rack, state.setValue(BatteryRackBlock.SLOTS.get(slot), BatteryRackBlock.Slot.EMPTY), Block.UPDATE_ALL);
                 level.playSound(null, bot.rack, SoundEvents.ITEM_FRAME_REMOVE_ITEM, SoundSource.BLOCKS, 1.0f, 0.8f);
                 bot.battery = new ItemStack(ModBlocks.BATTERY.get());
+                taken.add(bot.owner);
                 AvalonItems.setTag(bot.battery, KEY_OWNER, bot.owner.toString());
                 bot.entity.setItemInHand(InteractionHand.MAIN_HAND, bot.battery.copy());
                 bot.entity.swing(InteractionHand.MAIN_HAND);
@@ -625,6 +635,11 @@ public class BatteryMission implements BatteryRackBlock.Access {
         if (!onMission(player)) return false;
         if (isSource(pos)) {
             deny(player, "Baterai tidak bisa dikembalikan ke sini. Pasang di rak pilar.");
+            return false;
+        }
+        // Satu baterai per orang: yang lama harus diambil dulu sebelum memasang lagi
+        if (placed.containsKey(player.getUUID())) {
+            deny(player, "Bateraimu sudah terpasang.");
             return false;
         }
         int site = siteOfRack(pos);

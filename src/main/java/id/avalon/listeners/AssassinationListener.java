@@ -1,15 +1,14 @@
 package id.avalon.listeners;
 
 import id.avalon.managers.GameManager;
-import id.avalon.models.Role;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.ProjectileImpactEvent;
 import net.minecraftforge.event.entity.item.ItemTossEvent;
 import net.minecraftforge.event.entity.player.ArrowNockEvent;
@@ -64,7 +63,7 @@ public class AssassinationListener implements ItemGuard.InventoryClickRule {
     public void onProjectileImpact(ProjectileImpactEvent event) {
         if (!(event.getProjectile() instanceof AbstractArrow arrow)) return;
         if (arrow.level().isClientSide) return;
-        if (!isAssassinArrow(arrow)) return;
+        if (!gameManager.isAssassinArrow(arrow)) return;
 
         HitResult hit = event.getRayTraceResult();
         if (hit instanceof EntityHitResult entityHit) {
@@ -76,6 +75,18 @@ public class AssassinationListener implements ItemGuard.InventoryClickRule {
         } else if (hit.getType() == HitResult.Type.BLOCK) {
             // Hanya proses jika kena blok (bukan entity)
             gameManager.handleAssassinArrowMiss();
+        }
+    }
+
+    /**
+     * Panah assassin baru dilepas: mulai dipantau, supaya panah yang tidak pernah mendarat
+     * (jatuh ke void) tetap dihitung meleset.
+     */
+    @SubscribeEvent
+    public void onArrowSpawn(EntityJoinLevelEvent event) {
+        if (event.getLevel().isClientSide) return;
+        if (event.getEntity() instanceof AbstractArrow arrow && gameManager.isAssassinArrow(arrow)) {
+            gameManager.trackAssassinArrow(arrow);
         }
     }
 
@@ -113,13 +124,5 @@ public class AssassinationListener implements ItemGuard.InventoryClickRule {
         return gameManager.isAssassinBowItem(cur) || gameManager.isAssassinBowItem(cursor)
                 || gameManager.isAssassinationSkipItem(cur)
                 || gameManager.isAssassinationSkipItem(cursor);
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    /** Cek apakah arrow ditembak oleh assassin. */
-    private boolean isAssassinArrow(AbstractArrow arrow) {
-        if (!(arrow.getOwner() instanceof Player shooter)) return false;
-        return gameManager.getRole(shooter) == Role.ASSASSIN;
     }
 }

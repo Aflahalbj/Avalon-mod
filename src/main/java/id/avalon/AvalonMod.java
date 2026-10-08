@@ -151,7 +151,7 @@ public class AvalonMod {
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         if (gameManager != null) {
-            gameManager.cleanup();
+            gameManager.shutdown();
         }
         Scheduler.clear();
         PortalCutscene.reset();
@@ -163,6 +163,8 @@ public class AvalonMod {
     @SubscribeEvent
     public void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        // Tidak ada pemain game yang online: semua timer menunggu sampai ada yang masuk lagi
+        Scheduler.setPaused(gameManager.isFrozen());
         gameManager.tick();
         Scheduler.tick();
     }

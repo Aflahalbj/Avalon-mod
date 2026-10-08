@@ -37,6 +37,12 @@ public class UnregisCommand {
     private static int execute(CommandSourceStack sender, GameManager gameManager, String target)
             throws CommandSyntaxException {
 
+        // Nomor kursi mengikuti urutan daftar: mengubahnya di tengah game menggeser kursi semua orang
+        if (gameManager.isGameRunning()) {
+            sender.sendSystemMessage(Txt.t("Tidak bisa unregister saat game sedang berjalan!", ChatFormatting.RED));
+            return 1;
+        }
+
         List<String> names = new ArrayList<>();
         if (target.equals("@a")) {
             // Semua yang terdaftar, termasuk yang sedang offline

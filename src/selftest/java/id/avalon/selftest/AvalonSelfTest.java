@@ -224,6 +224,11 @@ public final class AvalonSelfTest {
         check(king.containerMenu instanceof AvalonMenu, "GUI pemilihan tim terbuka");
         AvalonMenu menu = (AvalonMenu) king.containerMenu;
         check(TeamSelectionGUI.isQuestionMark(menu.inv().getItem(0)), "slot target berisi question mark");
+        // Ukuran tim mengikuti nomor ronde, bukan jumlah misi sukses
+        int targets = 0;
+        for (int s : TeamSelectionGUI.TARGET_SLOTS) if (!menu.inv().getItem(s).isEmpty()) targets++;
+        check(targets == ROUND_TEAM_SIZE[gm().getCurrentRound() - 1],
+                "ronde " + gm().getCurrentRound() + ": GUI meminta " + ROUND_TEAM_SIZE[gm().getCurrentRound() - 1] + " anggota tim");
 
         for (String name : team) {
             int slot = -1;
@@ -367,8 +372,50 @@ public final class AvalonSelfTest {
         }
     }
 
+    /** Ukuran tim tiap ronde untuk 5 player (aturan Avalon), ditulis ulang di sini supaya tabelnya ikut teruji. */
+    private static final int[] ROUND_TEAM_SIZE = {2, 3, 2, 3, 3};
+
+    /**
+     * Anggota tim yang akan keluar di tengah misi. Sebisa mungkin bukan fake player yang sudah pernah
+     * keluar-masuk ("c" dan {@code alsoAvoid}): mereka bisa tercatat di dimensi lain.
+     */
+    private static String pickLeaver(String alsoAvoid) {
+        String fallback = null, best = null;
+        for (String n : gm().getCurrentMissionTeam()) {
+            if (n.equals("c")) continue;
+            fallback = n;
+            if (!n.equals(alsoAvoid)) best = n;
+        }
+        return best != null ? best : fallback;
+    }
+
     private static int teamSize() {
-        return TeamSelectionGUI.getTeamSize(5, gm().getCurrentMission());
+        return ROUND_TEAM_SIZE[gm().getCurrentRound() - 1];
+    }
+
+    /** Raja sudah diumumkan, online, dan memegang Buku Pemilihan Tim. */
+    private static boolean kingHoldsBook() {
+        String king = gm().getCurrentKingName();
+        return gm().isTeamSelectionActive() && king != null && p(king) != null
+                && findHotbarSlot(p(king), GameManager::isTeamBook) >= 0;
+    }
+
+    private static boolean everyoneInOverworld() {
+        for (String n : NAMES) {
+            if (p(n) == null || p(n).serverLevel() != server.overworld()) return false;
+        }
+        return true;
+    }
+
+    /** Satu misi sukses dari awal sampai pilarnya menyala: tim kubu baik, semua setuju, semua memasang. */
+    private static void quickSuccessMission(String label) {
+        waitFor(label + ": raja memegang buku", AvalonSelfTest::kingHoldsBook, 400);
+        run(label + ": tim baik", () -> kingPicksTeam(goodTeam()));
+        waitFor(label + ": voting", () -> vm().isVotingActive(), 200);
+        run(label + ": semua setuju", () -> everyoneVotes(VotingManager.VOTE_SETUJU));
+        waitFor(label + ": misi aktif", () -> gm().isMissionActive(), 200);
+        run(label + ": pasang baterai", () -> teamFillsPillar(openSite()));
+        waitFor(label + ": sukses", () -> !gm().isMissionActive(), 400);
     }
 
     private static List<String> goodTeam() {
@@ -409,22 +456,6 @@ public final class AvalonSelfTest {
             cmd("avalon cutscene on");
             check(gm().isCutsceneEnabled(), "cutscene on");
             cmd("avalon roleinfo merlin");
-
-            ServerLevel lvl = p("a").serverLevel();
-            // /queen dipakai admin di dekat arena (chunk queen harus ter-load)
-            p("a").teleportTo(lvl, -19.5, 81, -420, 0, 0);
-        });
-        sleep(60);
-        run("queen spawn / delete", () -> {
-            cmd("avalon queen spawn");
-            cmd("execute as a run avalon queen spawn");
-            check(gm().hasQueen(p("a").serverLevel()), "queen ter-spawn");
-            cmd("execute as a run avalon queen spawn");
-            int queens = 0;
-            for (Entity e : p("a").serverLevel().getAllEntities()) if (e.getTags().contains("avalon_queen")) queens++;
-            check(queens == 1, "queen tidak dobel");
-            cmd("execute as a run avalon queen delete");
-            check(!gm().hasQueen(p("a").serverLevel()), "queen terhapus");
         });
 
         // ── Custom role GUI ───────────────────────────────────────────────────
@@ -458,23 +489,42 @@ public final class AvalonSelfTest {
                     "custom role tersimpan");
         });
 
-        // ── PvP & step height ─────────────────────────────────────────────────
+        // ── Di luar game mod tidak ikut campur: step height green wool hanya untuk pemain game ──
         sleep(80); // tunggu spawn invulnerability (60 tick) habis
-        run("PvP diblok & step height green wool", () -> {
-            ServerPlayer a = p("a"), b = p("b");
-            b.setGameMode(GameType.SURVIVAL);
-            float before = b.getHealth();
-            a.attack(b);
-            check(b.getHealth() == before, "pukulan player ke player diblok");
-            BlockPos under = b.blockPosition().above(2);
-            b.serverLevel().setBlock(under, Blocks.GREEN_WOOL.defaultBlockState(), 3);
+        run("green wool di luar game", () -> {
+            ServerPlayer b = p("b");
+            b.serverLevel().setBlock(b.blockPosition().above(2), Blocks.GREEN_WOOL.defaultBlockState(), 3);
         });
         sleep(2);
-        run("cek step height", () -> {
+        run("cek step height di luar game", () -> {
             ServerPlayer b = p("b");
-            check(b.getAttribute(ForgeMod.STEP_HEIGHT_ADDITION.get()).getBaseValue() > 9.0, "step height naik dekat green wool");
+            check(b.getAttribute(ForgeMod.STEP_HEIGHT_ADDITION.get()).getBaseValue() == 0.0, "step height tidak diubah di luar game");
             b.serverLevel().setBlock(b.blockPosition().above(2), Blocks.AIR.defaultBlockState(), 3);
         });
+
+        // ── Start hanya kalau semua yang terdaftar online ─────────────────────
+        run("e offline sebelum start", () -> cmd("fakeplayer remove e"));
+        waitFor("e offline", () -> p("e") == null, 100);
+        run("startgame ditolak", () -> {
+            cmd("execute as a run avalon startgame");
+            check(!gm().isGameRunning(), "startgame ditolak selagi ada yang offline");
+            cmd("fakeplayer spawn e");
+        });
+        waitFor("e online lagi", () -> p("e") != null, 100);
+
+        // ── Keluar saat hitung mundur: game batal ─────────────────────────────
+        run("e keluar saat hitung mundur", () -> {
+            cmd("execute as a run avalon startgame");
+            check(gm().isGameRunning(), "hitung mundur berjalan");
+            cmd("fakeplayer remove e");
+        });
+        waitFor("game dibatalkan", () -> !gm().isGameRunning(), 100);
+        run("e masuk lagi", () -> {
+            check(gm().getRegisteredPlayers().size() == 5, "semua tetap terdaftar setelah batal");
+            cmd("fakeplayer spawn e");
+        });
+        waitFor("e online lagi", () -> p("e") != null, 100);
+        sleep(40);
 
         // ── Start game ────────────────────────────────────────────────────────
         run("startgame", () -> {
@@ -486,7 +536,6 @@ public final class AvalonSelfTest {
         run("cek cutscene", () -> {
             ServerPlayer a = p("a");
             check(gm().isMovementLocked(a), "gerakan terkunci saat cutscene portal");
-            check(gm().hasQueen(a.serverLevel()), "queen di-spawn saat startgame");
         });
         waitFor("fase perkenalan", () -> gm().getCurrentRevealPhase() == 1, 2400);
         sleep(3);
@@ -504,6 +553,8 @@ public final class AvalonSelfTest {
             return king != null && p(king) != null && findHotbarSlot(p(king), GameManager::isTeamBook) >= 0;
         }, 1200);
 
+        final BlockPos[] woolAt = new BlockPos[1];
+        final BlockState[] woolBefore = new BlockState[1];
         run("cek setelah perkenalan", () -> {
             for (String n : NAMES) {
                 ServerPlayer pl = p(n);
@@ -546,9 +597,18 @@ public final class AvalonSelfTest {
             check(gm().isOneSlot(other), "inventory 1 slot aktif selama game");
             other.getInventory().setItem(4, new ItemStack(Items.STICK));
             other.getInventory().selected = 4;
+
+            // Step height green wool (hanya pemain game selama game)
+            woolAt[0] = c.blockPosition().above(2);
+            woolBefore[0] = c.serverLevel().getBlockState(woolAt[0]);
+            c.serverLevel().setBlock(woolAt[0], Blocks.GREEN_WOOL.defaultBlockState(), 3);
         });
         sleep(2);
         run("cek inventory 1 slot", () -> {
+            ServerPlayer c = p("c");
+            check(c.getAttribute(ForgeMod.STEP_HEIGHT_ADDITION.get()).getBaseValue() > 9.0, "step height naik dekat green wool");
+            c.serverLevel().setBlock(woolAt[0], woolBefore[0], 3);
+
             ServerPlayer other = null;
             for (String n : NAMES) if (!n.equals(gm().getCurrentKingName())) { other = p(n); break; }
             check(other.getInventory().selected == 0, "slot terpilih dipaksa ke slot pertama");
@@ -704,9 +764,11 @@ public final class AvalonSelfTest {
         waitFor("mannequin c muncul", () -> gm().getOfflineMannequinCount() == 1, 100);
         run("player c reconnect", () -> cmd("fakeplayer spawn c"));
         waitFor("c kembali & mannequin hilang", () -> p("c") != null && gm().getOfflineMannequinCount() == 0, 200);
+        // Fake player masuk lagi di overworld: dibawa ke Avalon dulu, kursinya menyusul beberapa tick
+        waitFor("c didudukkan lagi", () -> onSeat(p("c")), 100);
         run("cek restore c", () -> {
             ServerPlayer c = p("c");
-            check(onSeat(c), "c didudukkan lagi");
+            check(c.level().dimension() == id.avalon.core.AvalonDimensions.AVALON, "c kembali ke dimensi Avalon");
             check(gm().isDiscussionSkipItem(c.getInventory().getItem(0)), "c dapat item skip lagi");
             everyoneSkips();
         });
@@ -724,14 +786,48 @@ public final class AvalonSelfTest {
         waitFor("voting misi 2", () -> vm().isVotingActive(), 200);
         run("semua setuju (misi 2)", () -> everyoneVotes(VotingManager.VOTE_SETUJU));
         waitFor("misi 2 aktif", () -> gm().isMissionActive(), 200);
-        run("sabotase", () -> {
-            String evil = null;
-            for (String n : gm().getCurrentMissionTeam()) if (gm().getRole(p(n)).isEvil()) evil = n;
-            ServerPlayer saboteur = p(evil);
+
+        // Satu baterai per orang, juga kalau bot-nya yang memasang: pemilik bot yang kembali di tengah
+        // misi tidak boleh memasang baterai kedua (dulu bisa, dan dihitung dua sabotase)
+        final String[] away = new String[1];
+        run("misi 2: anggota tim baik keluar sebelum mengambil baterai", () -> {
+            check(gm().getCurrentMissionTeam().size() == 3, "tim ronde 2 berisi 3 orang");
             check(!PillarBlock.isLit(avalon(), pillar(0)) && PillarBlock.isLit(avalon(), pillar(1)),
                     "hanya pilar 1 yang menyala");
             check(BatteryRackBlock.openSlots(avalon().getBlockState(pillarRack(1))) == 0, "rak pilar yang sudah menyala tetap tertutup");
             check(BatteryRackBlock.batteries(avalon().getBlockState(sourceRack(0))) == 6, "gudang diisi penuh lagi");
+            for (String n : gm().getCurrentMissionTeam()) if (gm().getRole(p(n)).isGood() && !n.equals("c")) away[0] = n;
+            cmd("fakeplayer remove " + away[0]);
+        });
+        waitFor("bot-nya ikut misi 2", () -> p(away[0]) == null && gm().getOfflineMannequinCount() == 1, 100);
+        run("anggota baik lain memilih pilar 0", () -> {
+            List<String> team = gm().getCurrentMissionTeam();
+            for (int i = 0; i < team.size(); i++) {
+                ServerPlayer member = p(team.get(i));
+                if (member == null || gm().getRole(member).isEvil()) continue;
+                clickRack(member, sourceRack(i), 3);
+                clickRack(member, pillarRack(0), firstSlot(pillarRack(0), BatteryRackBlock.Slot.EMPTY));
+                check(!holdsBattery(member), team.get(i) + " memasang baterai pertama di pilar 0");
+            }
+        });
+        waitFor("bot memasang baterainya di pilar 0",
+                () -> BatteryRackBlock.batteries(avalon().getBlockState(pillarRack(0))) == 2, 6000);
+        run("pemilik bot masuk lagi", () -> cmd("fakeplayer spawn " + away[0]));
+        waitFor("pemilik bot kembali ke misi", () -> p(away[0]) != null && gm().getOfflineMannequinCount() == 0, 200);
+        sleep(5);
+        run("pemilik bot tidak bisa memasang baterai kedua", () -> {
+            ServerPlayer back = p(away[0]);
+            check(gm().getBatteryMission().hasPlaced(back), "baterai yang dipasang bot tercatat milik pemiliknya");
+            clickRack(back, sourceRack(5), 0);
+            check(!holdsBattery(back), "pemilik bot tidak bisa mengambil baterai kedua dari gudang");
+            check(BatteryRackBlock.batteries(avalon().getBlockState(pillarRack(0))) == 2 && gm().isMissionActive(),
+                    "rak pilar 0 tetap berisi 2 baterai");
+        });
+
+        run("sabotase", () -> {
+            String evil = null;
+            for (String n : gm().getCurrentMissionTeam()) if (gm().getRole(p(n)).isEvil()) evil = n;
+            ServerPlayer saboteur = p(evil);
 
             int index = gm().getCurrentMissionTeam().indexOf(evil);
             clickRack(saboteur, sourceRack(index), 3);
@@ -741,7 +837,8 @@ public final class AvalonSelfTest {
             useSlot(saboteur, 0);
             check(gm().getBatteryMission().isSabotaging(saboteur), "klik beruntun tidak membolak-balik mode");
 
-            teamFillsPillar(0);
+            clickRack(saboteur, pillarRack(0), firstSlot(pillarRack(0), BatteryRackBlock.Slot.EMPTY));
+            check(!holdsBattery(saboteur), "kubu jahat memasang baterai sabotase");
             check(!gm().getBatteryMission().isActive() && gm().isMissionActive(), "rak pilar 0 penuh: cutscene berjalan");
         });
         waitFor("pilar 0 meluap", () -> avalon().getBlockState(pillar(0)).getValue(PillarBlock.OVERLOAD), 80);
@@ -760,6 +857,9 @@ public final class AvalonSelfTest {
             final int[] site = new int[1];
             run("misi " + round + ": tim baik", () -> {
                 lastKing = gm().getCurrentKingName();
+                // Satu misi sudah gagal: nomor ronde dan jumlah misi sukses tidak lagi sama
+                check(gm().getCurrentRound() == round && gm().getCurrentMission() == round - 1,
+                        "ronde " + round + " dengan " + (round - 2) + " misi sukses");
                 kingPicksTeam(goodTeam());
             });
             waitFor("voting misi " + round, () -> vm().isVotingActive(), 200);
@@ -768,8 +868,7 @@ public final class AvalonSelfTest {
             final String[] offline = new String[1];
             if (m == 0) {
                 run("anggota tim disconnect di tengah misi", () -> {
-                    // Bukan "c": fake player yang sudah pernah reconnect tercatat di dimensi lain
-                    for (String n : gm().getCurrentMissionTeam()) if (!n.equals("c")) offline[0] = n;
+                    offline[0] = pickLeaver(away[0]);
                     cmd("fakeplayer remove " + offline[0]);
                 });
                 waitFor("bot menggantikan", () -> p(offline[0]) == null && gm().getOfflineMannequinCount() == 1, 100);
@@ -777,7 +876,7 @@ public final class AvalonSelfTest {
             if (m == 1) {
                 final Vec3[] botAt = new Vec3[1];
                 run("anggota tim disconnect (akan kembali di tengah misi)", () -> {
-                    for (String n : gm().getCurrentMissionTeam()) if (!n.equals("c")) offline[0] = n;
+                    offline[0] = pickLeaver(away[0]);
                     cmd("fakeplayer remove " + offline[0]);
                 });
                 waitFor("bot mengambil baterai", () -> gm().getBatteryMission().botCarriesBattery(offline[0]), 3000);
@@ -834,6 +933,12 @@ public final class AvalonSelfTest {
                     check(onSeat(pl) && gm().isMovementLocked(pl), n + " (baik) duduk & terkunci");
                 }
             }
+            // PvP server menyala di fase ini; pemain game tetap tidak bisa saling melukai
+            ServerPlayer attacker = p(namesWith(Role::isEvil).get(0));
+            ServerPlayer victim = p(namesWith(Role::isGood).get(0));
+            float before = victim.getHealth();
+            attacker.attack(victim);
+            check(victim.getHealth() == before, "pukulan antar pemain game diblok");
             everyoneSkips();
         });
         waitFor("assassin dapat busur", () -> gm().isAssassinBowActive(), 100);
@@ -865,9 +970,6 @@ public final class AvalonSelfTest {
             for (String n : NAMES) {
                 check(p(n).serverLevel() == server.overworld(), n + " dipulangkan ke overworld");
             }
-            check(level.getBlockState(new BlockPos(gm().BASE_X, gm().BASE_Y, gm().BASE_Z)).isAir(), "cauldron dihapus");
-            check(level.getBlockState(new BlockPos(gm().BASE_X, gm().BASE_Y - 1, gm().BASE_Z)).is(Blocks.CHISELED_STONE_BRICKS),
-                    "campfire diganti chiseled stone bricks");
             int seats = 0;
             for (Entity e : level.getAllEntities()) if (e.getTags().contains("avalon_seat")) seats++;
             check(seats == 0, "semua kursi dihapus");
@@ -883,22 +985,120 @@ public final class AvalonSelfTest {
             }
         });
 
-        // ── Game kedua: /stopgame ─────────────────────────────────────────────
+        // ── Game kedua: raja offline, tim offline, panah assassin ke void ─────
         sleep(40);
-        run("game kedua lalu stopgame", () -> {
+        run("game kedua", () -> {
             for (String n : NAMES) {
                 ServerPlayer pl = p(n);
                 if (pl != null && pl.isDeadOrDying()) server.getPlayerList().respawn(pl, false);
             }
+            check(gm().getRole(p("a")) == null, "role game sebelumnya dibersihkan");
             cmd("avalon cutscene off");
             cmd("execute as a run avalon startgame");
             check(gm().isGameRunning(), "game kedua berjalan");
         });
+        waitFor("game 2: raja pertama memegang buku", AvalonSelfTest::kingHoldsBook, 2400);
+
+        // Raja keluar saat gilirannya memilih tim: setelah grace 90 detik raja berikutnya yang memilih
+        run("game 2: raja keluar saat memilih tim", () -> {
+            lastKing = gm().getCurrentKingName();
+            cmd("fakeplayer remove " + lastKing);
+        });
+        waitFor("game 2: raja diganti setelah grace", () -> kingHoldsBook()
+                && !gm().getCurrentKingName().equals(lastKing), 90 * 20 + 400);
+        run("game 2: raja lama masuk lagi", () -> cmd("fakeplayer spawn " + lastKing));
+        waitFor("game 2: raja lama duduk lagi", () -> p(lastKing) != null && gm().getOfflineMannequinCount() == 0
+                && onSeat(p(lastKing)), 300);
+        run("game 2: cek raja lama", () -> {
+            check(findHotbarSlot(p(lastKing), GameManager::isTeamBook) < 0, "raja lama tidak lagi memegang buku");
+            check(kingHoldsBook(), "raja baru tetap memegang buku");
+        });
+
+        // Seluruh tim sudah offline saat misi dimulai: misinya langsung dibatalkan, bukan macet
+        final List<String> gone = new ArrayList<>();
+        run("game 2: raja memilih dua player lain", () -> {
+            lastKing = gm().getCurrentKingName();
+            for (String n : NAMES) if (!n.equals(lastKing) && gone.size() < teamSize()) gone.add(n);
+            kingPicksTeam(gone);
+        });
+        waitFor("game 2: voting", () -> vm().isVotingActive(), 200);
+        run("game 2: tim setuju lalu keluar", () -> {
+            for (String n : gone) {
+                vote(p(n), VotingManager.VOTE_SETUJU);
+                cmd("fakeplayer remove " + n);
+            }
+        });
+        waitFor("game 2: tim offline", () -> p(gone.get(0)) == null && p(gone.get(1)) == null, 100);
+        run("game 2: sisanya setuju", () -> {
+            check(vm().isVotingActive(), "voting menunggu player yang masih online");
+            everyoneVotes(VotingManager.VOTE_SETUJU);
+            check(!vm().isVotingActive(), "voting selesai");
+        });
+        waitFor("game 2: misi dibatalkan & raja berganti", () -> !gm().isMissionActive() && kingHoldsBook()
+                && !gm().getCurrentKingName().equals(lastKing), 600);
+        run("game 2: cek misi batal & player offline tidak bisa dipilih", () -> {
+            check(gm().getCurrentRound() == 1 && gm().getEvilMissionFails() == 0, "misi batal tidak dihitung gagal");
+
+            // Tiga player online cukup untuk tim berisi dua: yang offline tidak bisa dipilih
+            ServerPlayer king = p(gm().getCurrentKingName());
+            useSlot(king, findHotbarSlot(king, GameManager::isTeamBook));
+            AvalonMenu menu = (AvalonMenu) king.containerMenu;
+            int slot = -1;
+            for (int s : TeamSelectionGUI.POOL_SLOTS) {
+                if (gone.get(0).equals(TeamSelectionGUI.getPlayerNameFromItem(menu.inv().getItem(s)))) slot = s;
+            }
+            check(slot >= 0, "player offline tetap tampil di GUI");
+            check(menu.inv().getItem(slot).getHoverName().getString().contains("OFFLINE"), "player offline diberi tanda");
+            click(king, slot);
+            check(TeamSelectionGUI.isQuestionMark(menu.inv().getItem(TeamSelectionGUI.TARGET_SLOTS[0])),
+                    "player offline tidak bisa dipilih selagi yang online cukup");
+            king.closeContainer();
+
+            for (String n : gone) cmd("fakeplayer spawn " + n);
+        });
+        waitFor("game 2: tim masuk lagi", () -> p(gone.get(0)) != null && p(gone.get(1)) != null
+                && gm().getOfflineMannequinCount() == 0 && onSeat(p(gone.get(0))) && onSeat(p(gone.get(1))), 300);
+
+        // Tiga misi sukses beruntun, lalu assassin menembak ke void
+        for (int m = 1; m <= 3; m++) {
+            quickSuccessMission("game 2 misi " + m);
+            if (m < 3) {
+                waitFor("game 2: diskusi " + m, () -> gm().isDiscussionActive(), 600);
+                run("game 2: skip diskusi " + m, AvalonSelfTest::everyoneSkips);
+            }
+        }
+        waitFor("game 2: fase assassination", () -> gm().isAssassinationActive(), 600);
+        run("game 2: kubu jahat skip", AvalonSelfTest::everyoneSkips);
+        waitFor("game 2: assassin dapat busur", () -> gm().isAssassinBowActive(), 100);
+        run("game 2: panah assassin jatuh ke void", () -> {
+            ServerPlayer assassin = p(nameWithRole(Role.ASSASSIN));
+            ServerLevel level = assassin.serverLevel();
+            // Di bawah dunia, tidak ada block maupun entity yang bisa dikenai: tidak pernah ada event tumbukan
+            Arrow arrow = new Arrow(level, assassin);
+            arrow.setPos(assassin.getX(), level.getMinBuildHeight() - 50, assassin.getZ());
+            level.addFreshEntity(arrow);
+        });
+        waitFor("game 2 selesai (panah meleset, kubu baik menang)", () -> !gm().isGameRunning(), 4000);
+        run("game 2: cek pulang", () -> check(everyoneInOverworld(), "semua dipulangkan ke overworld"));
+
+        // ── Game ketiga: /stopgame dari console ───────────────────────────────
+        sleep(40);
+        run("game ketiga lalu stopgame", () -> {
+            for (String n : NAMES) {
+                ServerPlayer pl = p(n);
+                if (pl != null && pl.isDeadOrDying()) server.getPlayerList().respawn(pl, false);
+            }
+            cmd("execute as a run avalon startgame");
+            check(gm().isGameRunning(), "game ketiga berjalan");
+        });
         sleep(200);
         run("stopgame", () -> {
-            cmd("execute as a run avalon stopgame");
-            check(!gm().isGameRunning(), "stopgame menghentikan game");
+            check(p("a").serverLevel() == avalon(), "player sudah dibawa ke dimensi Avalon");
+            cmd("avalon stopgame");
+            check(!gm().isGameRunning(), "stopgame dari console menghentikan game");
             check(gm().getRegisteredPlayers().size() == 5, "player tetap terdaftar setelah stopgame");
+            check(everyoneInOverworld(), "stopgame memulangkan semua player");
+            check(server.isPvpAllowed(), "PvP dikembalikan seperti sebelum game");
         });
         sleep(20);
     }

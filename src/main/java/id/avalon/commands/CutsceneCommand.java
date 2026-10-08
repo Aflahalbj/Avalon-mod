@@ -109,6 +109,10 @@ public class CutsceneCommand {
             }
         }
 
+        if (gameManager.isGameRunning()) {
+            sender.sendSystemMessage(Txt.t("Tidak bisa tes cutscene portal saat game berjalan.", ChatFormatting.RED));
+            return 1;
+        }
         if (PortalCutscene.isRunning()) {
             sender.sendSystemMessage(Txt.t("Cutscene portal sedang berjalan.", ChatFormatting.RED));
             return 1;
@@ -221,6 +225,11 @@ public class CutsceneCommand {
     }
 
     private static int stopPortal(CommandSourceStack sender, GameManager gameManager) {
+        // Cutscene pembuka game: menghentikannya meninggalkan player di luar Avalon sementara game lanjut
+        if (gameManager.isGameRunning()) {
+            sender.sendSystemMessage(Txt.t("Tidak bisa menghentikan cutscene portal saat game berjalan. Pakai /avalon stopgame.", ChatFormatting.RED));
+            return 1;
+        }
         if (PortalCutscene.stop(gameManager)) {
             sender.sendSystemMessage(Txt.t("✔ Cutscene portal dihentikan.", ChatFormatting.YELLOW));
         } else {

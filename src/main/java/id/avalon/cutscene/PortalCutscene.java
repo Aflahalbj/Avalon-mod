@@ -114,7 +114,8 @@ public final class PortalCutscene {
     /** Player sudah masuk portal: buka kunci, lalu serahkan ke {@code onArrive} atau bebaskan di tempat. */
     private static void arrive(GameManager gm, ServerPlayer p) {
         locked.remove(p);
-        gm.unlockMovement(p);
+        unlock(gm, p);
+        // Keluar (atau keluar-masuk) sebelum gilirannya: game yang menyusulkannya saat ia online lagi
         if (!gm.isOnline(p)) return;
 
         p.fallDistance = 0;
@@ -126,12 +127,18 @@ public final class PortalCutscene {
         }
     }
 
+    /** Buka kunci gerakan; kalau player sudah keluar-masuk, client barunya yang diberi tahu. */
+    private static void unlock(GameManager gm, ServerPlayer p) {
+        ServerPlayer now = gm.getPlayer(p.getUUID());
+        gm.unlockMovement(now != null ? now : p);
+    }
+
     /** Hentikan cutscene di tengah jalan: player yang belum tersedot dibebaskan di tempat. */
     public static boolean stop(GameManager gm) {
         if (!running) return false;
 
         for (ServerPlayer p : locked) {
-            gm.unlockMovement(p);
+            unlock(gm, p);
         }
         if (level != null) {
             for (ServerPlayer viewer : level.players()) {

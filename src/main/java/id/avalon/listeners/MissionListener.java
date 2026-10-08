@@ -19,7 +19,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
  *  2. Klik kanan item skip diskusi
  *  3. Cegah drop/pindah item skip diskusi
  *  4. Cegah player game menghancurkan block (anggota tim misi ada di mode Survival)
- *  5. Cancel fall damage selama game berjalan
+ *  5. Cancel fall damage pemain game selama game berjalan
  *
  * Mengambil & memasang baterai (klik kiri di rak) diatur BatteryMission lewat BatteryRackBlock.
  */
@@ -50,8 +50,8 @@ public class MissionListener implements ItemGuard.InventoryClickRule {
             return true;
         }
 
-        // onPickup: semua klik keyboard (angka hotbar, Q, F) dibatalkan
-        return ctx.isKeyboardClick();
+        // onPickup: semua klik keyboard (angka hotbar, Q, F) pemain game dibatalkan selama game
+        return ctx.isKeyboardClick() && gameManager.isOneSlot(ctx.player());
     }
 
     // ── Klik kanan baterai (mode sabotase) / item skip diskusi ────────────────
@@ -103,9 +103,10 @@ public class MissionListener implements ItemGuard.InventoryClickRule {
     @SubscribeEvent(priority = EventPriority.HIGH)
     public void onFallDamage(LivingAttackEvent event) {
         if (!event.getSource().is(DamageTypeTags.IS_FALL)) return;
-        if (!(event.getEntity() instanceof Player)) return;
-        if (event.getEntity().level().isClientSide) return;
-        if (!gameManager.isGameRunning()) return;
+        if (!(event.getEntity() instanceof Player player)) return;
+        if (player.level().isClientSide) return;
+        // Hanya pemain game; player lain di server tidak ikut kebal
+        if (!gameManager.isOneSlot(player)) return;
         event.setCanceled(true);
     }
 }

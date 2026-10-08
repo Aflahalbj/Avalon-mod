@@ -128,6 +128,13 @@ public class TeamSelectionListener implements AvalonMenu.ClickHandler {
                 return;
             }
 
+            // Ada yang keluar (atau masuk) sejak dipilih: jatah player offline dihitung ulang
+            if (gameManager.countOffline(selectedTeam) > gameManager.offlinePicksAllowed()) {
+                player.sendSystemMessage(Txt.t("Tim berisi player yang sedang offline. Ganti dengan yang online.", ChatFormatting.RED));
+                Fx.sound(player, SoundEvents.VILLAGER_NO, 1.0f, 1.0f);
+                return;
+            }
+
             player.closeContainer();
             gameManager.confirmTeamSelection(player, selectedTeam);
             return;
@@ -162,6 +169,14 @@ public class TeamSelectionListener implements AvalonMenu.ClickHandler {
             int targetSlot = findFirstQuestionMarkSlot(inv, teamSize);
             if (targetSlot == -1) {
                 player.sendSystemMessage(Txt.t("Semua slot sudah terisi!", ChatFormatting.RED));
+                Fx.sound(player, SoundEvents.VILLAGER_NO, 1.0f, 1.0f);
+                return;
+            }
+
+            // Player offline hanya untuk menutup kekurangan: sebanyak slot yang tidak bisa diisi yang online
+            if (gameManager.getPlayerExact(playerName) == null
+                    && gameManager.countOffline(collectSelectedPlayers(inv, teamSize)) >= gameManager.offlinePicksAllowed()) {
+                player.sendSystemMessage(Txt.t(playerName + " sedang offline. Pilih player yang online dulu.", ChatFormatting.RED));
                 Fx.sound(player, SoundEvents.VILLAGER_NO, 1.0f, 1.0f);
                 return;
             }

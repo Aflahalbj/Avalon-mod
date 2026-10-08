@@ -14,8 +14,17 @@ public final class Scheduler {
     private static final List<Task> tasks = new ArrayList<>();
     private static final List<Task> pending = new ArrayList<>();
     private static long currentTick = 0;
+    private static boolean paused = false;
 
     private Scheduler() {}
+
+    /**
+     * Bekukan / lanjutkan semua task: selama beku tidak ada yang dijalankan dan sisa waktu tiap task
+     * tidak berkurang (dipakai saat game berjalan tapi tidak ada satu pun pemainnya yang online).
+     */
+    public static void setPaused(boolean value) {
+        paused = value;
+    }
 
     /** Dipanggil sekali per tick server (ServerTickEvent END). */
     public static void tick() {
@@ -23,6 +32,11 @@ public final class Scheduler {
 
         tasks.addAll(pending);
         pending.clear();
+
+        if (paused) {
+            for (Task task : tasks) task.nextRun++;
+            return;
+        }
 
         List<Task> snapshot = new ArrayList<>(tasks);
         for (Task task : snapshot) {
@@ -57,6 +71,7 @@ public final class Scheduler {
         for (Task t : pending) t.cancel();
         tasks.clear();
         pending.clear();
+        paused = false;
     }
 
     /** Jalankan runnable sekali setelah delay tick (setara runTaskLater). */

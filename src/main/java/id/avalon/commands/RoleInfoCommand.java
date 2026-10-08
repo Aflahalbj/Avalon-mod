@@ -36,9 +36,9 @@ public class RoleInfoCommand {
 
               §b§lMERLIN
 
-              §rMerlin adalah kunci dari penyembuhan ratu amaryn.
+              §rMerlin adalah kunci dari pengaktifan portal.
 
-              §rHanya Merlin yang dapat membaca mantra penyembuhan.
+              §rHanya Merlin yang dapat membaca mantra pengaktifan.
 
               §aKemampuan:
                §r• Melihat semua kubu jahat

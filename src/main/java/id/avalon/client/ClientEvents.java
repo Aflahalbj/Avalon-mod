@@ -146,6 +146,7 @@ public final class ClientEvents {
                 return;
             }
 
+            RevealClient.beforeRender(event.getEntity());
             float s = ClientState.getScale(event.getEntity().getId());
             event.getPoseStack().pushPose();
             PortalCutsceneClient.applyTransform(event.getEntity(), event.getPoseStack(), event.getPartialTick());
@@ -158,6 +159,7 @@ public final class ClientEvents {
         @SubscribeEvent
         public static void onRenderPlayerPost(RenderPlayerEvent.Post event) {
             event.getPoseStack().popPose();
+            RevealClient.afterRender(event.getEntity());
         }
 
         // ── Cutscene portal ───────────────────────────────────────────────────
@@ -197,6 +199,11 @@ public final class ClientEvents {
         @SubscribeEvent
         public static void onRenderOverlay(RenderGuiOverlayEvent.Pre event) {
             if (PortalCutsceneClient.hasCamera() || PillarCutsceneClient.hasCamera() || EndingClient.hasCamera()) {
+                event.setCanceled(true);
+                return;
+            }
+            // Bar lapar tidak dipakai selama game (anggota tim misi sengaja dibuat lapar supaya tidak bisa lari)
+            if (OneSlotHud.active() && event.getOverlay() == VanillaGuiOverlay.FOOD_LEVEL.type()) {
                 event.setCanceled(true);
                 return;
             }

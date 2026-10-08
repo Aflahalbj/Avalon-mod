@@ -30,7 +30,6 @@ public final class AvalonCommands {
         CustomRoleCommand.register(sub, gameManager);
         CutsceneCommand.register(sub, gameManager);
         RoleInfoCommand.register(sub, gameManager);
-        QueenCommand.register(sub, gameManager);
         GotoCommand.register(sub, gameManager);
         StartGameCommand.register(sub, gameManager);
         DebugRolesCommand.register(sub, gameManager);

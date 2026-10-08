@@ -3,7 +3,6 @@ package id.avalon.managers;
 import id.avalon.AvalonMod;
 import id.avalon.core.AvalonItems;
 import id.avalon.core.Fx;
-import id.avalon.core.Scheduler;
 import id.avalon.core.Task;
 import id.avalon.core.Txt;
 import net.minecraft.ChatFormatting;
@@ -13,7 +12,6 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.decoration.ArmorStand;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -347,28 +345,26 @@ public class VotingManager {
                 broadcast(Txt.blank());
 
                 // Trigger evil win
-                Scheduler.later(60L, () -> {
-                    if (!gameManager.isGameRunning()) return;
-                    gameManager.triggerEvilWin("5x penolakan berturut-turut");
-                });
+                gameManager.later(60L, () -> gameManager.triggerEvilWin("5x penolakan berturut-turut"));
             } else {
                 // Warning sisa penolakan
                 broadcast(
-                    Txt.t("  ⚠ Penolakan ke-" + rejectStreak + " dari " + MAX_REJECT_STREAK + ".",
+                    Txt.t("  ⚠ Penolakan ke-" + rejectStreak + " dari " + MAX_REJECT_STREAK + " penolakan berturut-turut.",
                         ChatFormatting.YELLOW)
                 );
                 broadcast(
                     Txt.t("  Jika ditolak " + remaining + "x lagi, Kubu Jahat menang!",
                         ChatFormatting.YELLOW)
                 );
+                broadcast(
+                    Txt.t("  Batas penolakan adalah 5x BERTURUT-TURUT.",
+                        ChatFormatting.YELLOW)
+                );
                 broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.RED));
                 broadcast(Txt.blank());
 
                 // Delay 3 detik lalu rotasi raja
-                Scheduler.later(60L, () -> {
-                    if (!gameManager.isGameRunning()) return;
-                    gameManager.rotateKing();
-                });
+                gameManager.later(60L, gameManager::rotateKing);
             }
         } else {
             // Tim disetujui — reset reject streak
@@ -380,10 +376,7 @@ public class VotingManager {
             broadcast(Txt.blank());
 
             final List<String> team = new ArrayList<>(currentTeam);
-            Scheduler.later(60L, () -> {
-                if (!gameManager.isGameRunning()) return;
-                gameManager.startMissionPhase(team);
-            });
+            gameManager.later(60L, () -> gameManager.startMissionPhase(team));
         }
     }
 
@@ -538,10 +531,5 @@ public class VotingManager {
 
     private void broadcast(Component message) {
         for (ServerPlayer p : getRegisteredOnlinePlayers()) p.sendSystemMessage(message);
-    }
-
-    /** Untuk kompatibilitas: cek apakah player sudah vote. */
-    public boolean hasVoted(Player player) {
-        return votes.containsKey(player.getGameProfile().getName());
     }
 }
