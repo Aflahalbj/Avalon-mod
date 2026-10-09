@@ -37,6 +37,7 @@ public final class AvalonCommands {
         DebugCommand.register(sub, gameManager);
         StopGameCommand.register(sub, gameManager);
         SetTimerCommand.register(sub, gameManager);
+        LadyCommand.register(sub, gameManager);
 
         // Root tanpa requires: /avalon roleinfo boleh untuk semua player, sisanya dicek per subcommand.
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(ROOT);

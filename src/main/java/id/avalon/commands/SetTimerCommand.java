@@ -19,7 +19,7 @@ public class SetTimerCommand {
             .executes(ctx -> usage(ctx.getSource()))
             .then(Commands.argument("type", StringArgumentType.word())
                 .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
-                    Arrays.asList("reveal", "voting", "discuss", "evildiscuss"), builder))
+                    Arrays.asList("reveal", "voting", "discuss", "evildiscuss", "lady"), builder))
                 .executes(ctx -> usage(ctx.getSource()))
                 .then(Commands.argument("seconds", StringArgumentType.word())
                     .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
@@ -35,6 +35,7 @@ public class SetTimerCommand {
         sender.sendSystemMessage(Txt.legacy("§7/avalon settimer voting <detik>"));
         sender.sendSystemMessage(Txt.legacy("§7/avalon settimer discuss <detik>"));
         sender.sendSystemMessage(Txt.legacy("§7/avalon settimer evildiscuss <detik>"));
+        sender.sendSystemMessage(Txt.legacy("§7/avalon settimer lady <detik>"));
         return 1;
     }
 
@@ -74,6 +75,11 @@ public class SetTimerCommand {
             case "evildiscuss" -> {
                 gameManager.setEvilDiscussionSeconds(seconds);
                 sender.sendSystemMessage(Txt.legacy("§aEvil discussion timer diubah menjadi §e" + seconds + "§a detik."));
+            }
+
+            case "lady" -> {
+                gameManager.setLadySeconds(seconds);
+                sender.sendSystemMessage(Txt.legacy("§aLady of the Lake timer diubah menjadi §e" + seconds + "§a detik."));
             }
 
             default -> {

@@ -25,7 +25,8 @@ public class RoleInfoCommand {
         "morgana",
         "mordred",
         "oberon",
-        "minion"
+        "minion",
+        "lady"
     );
 
     private static final Map<String, String> ROLE_INFO = Map.ofEntries(
@@ -153,6 +154,28 @@ public class RoleInfoCommand {
 
               §eTidak memiliki kekuatan khusus lainnya.
 
+            """
+        ),
+
+        Map.entry("lady",
+            """
+            §6═══════════════════════
+
+              §b§lLADY OF THE LAKE
+
+              §rBukan peran, melainkan token yang berpindah tangan.
+
+              §rAwalnya dipegang pemain di kanan raja pertama.
+
+              §aKemampuan:
+               §r• Setelah misi ke-2, 3 dan 4, pemegangnya memeriksa satu pemain
+               §r• Ia melihat kubu pemain itu (baik / jahat), bukan perannya
+               §r• Setelah itu Lady berpindah ke pemain yang diperiksa
+
+              §cPenting:
+               §e• Yang pernah memegang Lady tidak bisa diperiksa.
+               §e• Hasilnya hanya diketahui pemegang, dan ia boleh berbohong.
+               §e• Waktu memilih terbatas; kalau habis, targetnya dipilih acak.
             """
         )
     );

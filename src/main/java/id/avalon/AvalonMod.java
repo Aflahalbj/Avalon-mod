@@ -15,6 +15,7 @@ import id.avalon.listeners.CommandBlockListener;
 import id.avalon.listeners.CustomRoleListener;
 import id.avalon.listeners.CutsceneListener;
 import id.avalon.listeners.ItemGuard;
+import id.avalon.listeners.LadyListener;
 import id.avalon.listeners.MissionListener;
 import id.avalon.listeners.OneSlotListener;
 import id.avalon.listeners.PlayerOfflineHandler;
@@ -91,11 +92,13 @@ public class AvalonMod {
         AssassinationListener assassinationListener = new AssassinationListener(gameManager);
         MissionListener missionListener = new MissionListener(gameManager);
         TeamBookListener teamBookListener = new TeamBookListener(gameManager);
+        LadyListener ladyListener = new LadyListener(gameManager);
         VotingListener votingListener = new VotingListener(gameManager, votingManager);
 
         MinecraftForge.EVENT_BUS.register(new CommandBlockListener(gameManager));
         MinecraftForge.EVENT_BUS.register(new CutsceneListener(gameManager));
         MinecraftForge.EVENT_BUS.register(teamBookListener);
+        MinecraftForge.EVENT_BUS.register(ladyListener);
         MinecraftForge.EVENT_BUS.register(votingListener);
         MinecraftForge.EVENT_BUS.register(missionListener);
         MinecraftForge.EVENT_BUS.register(assassinationListener);
@@ -110,6 +113,7 @@ public class AvalonMod {
                 assassinationListener,
                 missionListener,
                 teamBookListener,
+                ladyListener,
                 votingListener,
                 oneSlotListener
         );

@@ -27,7 +27,7 @@ import java.util.function.Supplier;
  */
 public final class AvalonNetwork {
 
-    private static final String PROTOCOL = "4";
+    private static final String PROTOCOL = "5";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(AvalonMod.MOD_ID, "main"),
@@ -74,6 +74,10 @@ public final class AvalonNetwork {
                 EndingStart::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         CHANNEL.registerMessage(id++, EndingStop.class, EndingStop::encode, EndingStop::decode,
                 EndingStop::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(id++, Lady.class, Lady::encode, Lady::decode,
+                Lady::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(id++, LadyInspect.class, LadyInspect::encode, LadyInspect::decode,
+                LadyInspect::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     // ── Helpers kirim ─────────────────────────────────────────────────────────
@@ -398,6 +402,59 @@ public final class AvalonNetwork {
         static void handle(Crown m, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> () -> id.avalon.client.ClientPacketHandler.crown(m)));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    /**
+     * Token Lady of the Lake: {@code holder} kosong = hapus; {@code animate} = muncul / terbang dari
+     * pemegang sebelumnya.
+     */
+    public record Lady(String holder, int seat, boolean animate) {
+        public static final Lady NONE = new Lady("", -1, false);
+
+        static void encode(Lady m, FriendlyByteBuf buf) {
+            buf.writeUtf(m.holder);
+            buf.writeInt(m.seat);
+            buf.writeBoolean(m.animate);
+        }
+
+        static Lady decode(FriendlyByteBuf buf) {
+            return new Lady(buf.readUtf(), buf.readInt(), buf.readBoolean());
+        }
+
+        static void handle(Lady m, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> () -> id.avalon.client.ClientPacketHandler.lady(m)));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    /**
+     * Mainkan animasi pemeriksaan Lady of the Lake (lihat LadyTimeline): roh keluar dari {@code target}
+     * dan masuk ke {@code holder}. {@code result} hanya diisi untuk client si pemegang; client lain
+     * selalu menerima {@link #HIDDEN}, jadi kubu yang diperiksa tidak pernah sampai ke mereka.
+     */
+    public record LadyInspect(String target, int targetSeat, String holder, int holderSeat, int result) {
+        public static final int HIDDEN = 0;
+        public static final int GOOD = 1;
+        public static final int EVIL = 2;
+
+        static void encode(LadyInspect m, FriendlyByteBuf buf) {
+            buf.writeUtf(m.target);
+            buf.writeInt(m.targetSeat);
+            buf.writeUtf(m.holder);
+            buf.writeInt(m.holderSeat);
+            buf.writeVarInt(m.result);
+        }
+
+        static LadyInspect decode(FriendlyByteBuf buf) {
+            return new LadyInspect(buf.readUtf(), buf.readInt(), buf.readUtf(), buf.readInt(), buf.readVarInt());
+        }
+
+        static void handle(LadyInspect m, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> () -> id.avalon.client.ClientPacketHandler.ladyInspect(m)));
             ctx.get().setPacketHandled(true);
         }
     }

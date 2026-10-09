@@ -89,6 +89,14 @@ public final class ClientPacketHandler {
         CrownClient.set(msg.king(), msg.seat(), msg.animate());
     }
 
+    public static void lady(AvalonNetwork.Lady msg) {
+        LadyClient.set(msg.holder(), msg.seat(), msg.animate());
+    }
+
+    public static void ladyInspect(AvalonNetwork.LadyInspect msg) {
+        LadyClient.inspect(msg.target(), msg.targetSeat(), msg.holder(), msg.holderSeat(), msg.result());
+    }
+
     public static void endingStart(AvalonNetwork.EndingStart msg) {
         EndingClient.start(msg);
     }

@@ -38,7 +38,8 @@ Sama persis dengan plugin. Semua butuh OP (permission level 2), kecuali `/avalon
 | `/avalon debugroles` | lihat role semua player |
 | `/avalon setrole <player> <role\|acak>` | pastikan player terdaftar mendapat role itu di game berikutnya. Hanya role yang aktif untuk jumlah player terdaftar (default / hasil `customrole`), dan tidak bisa dobel kecuali role yang memang ada beberapa (Loyal Servant, Minion). Tanpa argumen: daftar yang sudah diatur |
 | `/avalon debug alwaysking <player\|off>` | tes: player itu selalu jadi raja (raja tidak bergilir) |
-| `/avalon settimer <reveal\|voting\|discuss\|evildiscuss> <detik>` | ubah timer |
+| `/avalon settimer <reveal\|voting\|discuss\|evildiscuss\|lady> <detik>` | ubah timer |
+| `/avalon lady <auto\|on\|off>` | Lady of the Lake: `auto` (default) = hanya untuk game berisi 7 player atau lebih, `on` = selalu, `off` = tidak pernah. Setelah misi ke-2, 3 dan 4 pemegangnya memilih satu pemain (boleh yang offline) untuk dilihat kubunya, lalu Lady berpindah ke pemain itu; waktu memilih habis (`settimer lady`, default 60 detik) = dipilih acak, kecuali ia sudah memilih di GUI tapi belum menekan konfirmasi (pilihan itu yang dipakai) |
 
 ## Padanan fitur Paper → Forge
 

@@ -8,6 +8,7 @@ import id.avalon.core.AvalonDimensions;
 import id.avalon.core.AvalonDimensions;
 import id.avalon.core.PlayerScale;
 import id.avalon.gui.AvalonMenu;
+import id.avalon.gui.LadyGUI;
 import id.avalon.gui.TeamSelectionGUI;
 import id.avalon.managers.GameManager;
 import id.avalon.managers.VotingManager;
@@ -456,6 +457,24 @@ public final class AvalonSelfTest {
             cmd("avalon cutscene on");
             check(gm().isCutsceneEnabled(), "cutscene on");
             cmd("avalon roleinfo merlin");
+            cmd("avalon roleinfo lady");
+
+            // Lady of the Lake: auto = hanya 7 player atau lebih
+            check(!gm().isLadyEnabled(), "lady auto: mati untuk 5 player");
+            cmd("avalon lady off");
+            check(gm().getLadyMode() == GameManager.LadyMode.OFF, "lady off");
+            cmd("avalon lady foo");
+            cmd("avalon lady auto");
+            gm().registerPlayer("x6");
+            gm().registerPlayer("x7");
+            check(gm().isLadyEnabled(), "lady auto: nyala untuk 7 player");
+            gm().unregisterPlayer("x6");
+            gm().unregisterPlayer("x7");
+            check(!gm().isLadyEnabled() && gm().getRegisteredPlayers().size() == 5, "lady auto: mati lagi untuk 5 player");
+            cmd("avalon lady on");
+            check(gm().isLadyEnabled(), "lady on: dipakai juga untuk 5 player");
+            cmd("avalon settimer lady 45");
+            check(gm().getLadySeconds() == 45, "settimer lady");
         });
 
         // ── Custom role GUI ───────────────────────────────────────────────────
@@ -564,6 +583,9 @@ public final class AvalonSelfTest {
             ServerPlayer king = p(gm().getCurrentKingName());
             king.stopRiding();
             check(onSeat(king), "player tidak bisa turun dari kursi");
+            check(gm().getLadyHolder() != null && !gm().getLadyHolder().equals(gm().getCurrentKingName()),
+                    "Lady of the Lake dipegang player lain selain raja pertama");
+            check(gm().getLadyCandidates().size() == 4 && !gm().isLadyActive(), "Lady belum dipakai sebelum misi ke-2");
 
             // Buku tidak bisa dipindah / dibuang
             int slot = findHotbarSlot(king, GameManager::isTeamBook);
@@ -846,6 +868,96 @@ public final class AvalonSelfTest {
         waitFor("pilar 0 mati lagi", () -> !avalon().getBlockState(pillar(0)).getValue(PillarBlock.OVERLOAD), 100);
         run("cek pilar setelah sabotase", () ->
                 check(!PillarBlock.isLit(avalon(), pillar(0)), "pilar yang disabotase tidak menyala"));
+
+        // ── Lady of the Lake setelah misi ke-2: yang diperiksa sedang offline ──
+        final String[] ladyFrom = new String[1];
+        final String[] ladyTo = new String[1];
+        waitFor("fase Lady setelah misi 2", () -> gm().isLadyActive(), 600);
+        run("cek item Lady, lalu calon target keluar", () -> {
+            ladyFrom[0] = gm().getLadyHolder();
+            ServerPlayer holder = p(ladyFrom[0]);
+            check(!gm().isDiscussionActive(), "diskusi menunggu Lady selesai");
+            check(GameManager.isLadyItem(holder.getInventory().getItem(0)), "pemegang dapat item Lady");
+            holder.drop(false);
+            check(GameManager.isLadyItem(holder.getInventory().getItem(0)), "item Lady tidak bisa di-drop");
+            holder.inventoryMenu.clicked(36, 0, ClickType.PICKUP, holder);
+            check(holder.inventoryMenu.getCarried().isEmpty(), "item Lady tidak bisa dipindah");
+
+            // Bukan pemegang tidak bisa membuka GUI
+            ServerPlayer other = null;
+            for (String n : NAMES) if (!n.equals(ladyFrom[0])) { other = p(n); break; }
+            gm().giveLadyItem(other);
+            useSlot(other, 0);
+            check(!(other.containerMenu instanceof AvalonMenu), "bukan pemegang Lady tidak bisa buka GUI");
+            other.getInventory().clearContent();
+
+            ladyTo[0] = gm().getLadyCandidates().get(0);
+            cmd("fakeplayer remove " + ladyTo[0]);
+        });
+        waitFor("calon target offline", () -> p(ladyTo[0]) == null && gm().getOfflineMannequinCount() == 1, 100);
+        run("pemegang Lady memeriksa pemain yang offline", () -> {
+            ServerPlayer holder = p(ladyFrom[0]);
+            check(gm().isLadyActive(), "fase Lady tetap berjalan saat pemain lain keluar");
+            useSlot(holder, 0);
+            check(holder.containerMenu instanceof AvalonMenu, "GUI Lady terbuka");
+            AvalonMenu menu = (AvalonMenu) holder.containerMenu;
+            int heads = 0, offlineSlot = -1, onlineSlot = -1;
+            for (int slot : LadyGUI.POOL_SLOTS) {
+                String name = LadyGUI.getCandidate(menu.inv().getItem(slot));
+                if (name == null) continue;
+                heads++;
+                check(!name.equals(ladyFrom[0]), "pemegang tidak bisa memeriksa dirinya sendiri");
+                if (name.equals(ladyTo[0])) offlineSlot = slot;
+                else onlineSlot = slot;
+            }
+            check(heads == 4, "GUI menampilkan 4 pemain yang bisa diperiksa");
+            check(offlineSlot >= 0 && menu.inv().getItem(offlineSlot).getHoverName().getString().contains("OFFLINE"),
+                    "pemain offline tampil dengan tanda OFFLINE");
+
+            click(holder, LadyGUI.CONFIRM_SLOT);
+            check(holder.containerMenu instanceof AvalonMenu && gm().isLadyActive(), "konfirmasi ditolak sebelum memilih");
+            click(holder, onlineSlot);
+            check(LadyGUI.getCandidate(menu.inv().getItem(LadyGUI.TARGET_SLOT)) != null, "klik kepala = memilih");
+            click(holder, LadyGUI.TARGET_SLOT);
+            check(LadyGUI.getCandidate(menu.inv().getItem(LadyGUI.TARGET_SLOT)) == null, "klik pilihan = membatalkan");
+
+            // Pool dirender ulang setelah tiap klik: cari lagi kepala pemain yang offline
+            for (int slot : LadyGUI.POOL_SLOTS) {
+                if (ladyTo[0].equals(LadyGUI.getCandidate(menu.inv().getItem(slot)))) offlineSlot = slot;
+            }
+            click(holder, offlineSlot);
+            check(ladyTo[0].equals(LadyGUI.getCandidate(menu.inv().getItem(LadyGUI.TARGET_SLOT))),
+                    "pemain offline bisa dipilih");
+            click(holder, LadyGUI.CONFIRM_SLOT);
+
+            check(!(holder.containerMenu instanceof AvalonMenu), "GUI Lady tertutup setelah konfirmasi");
+            check(!gm().isLadyActive() && !gm().isDiscussionActive(), "animasi pemeriksaan berjalan sebelum diskusi");
+            check(holder.getInventory().getItem(0).isEmpty(), "item Lady diambil lagi");
+            check(ladyFrom[0].equals(gm().getLadyHolder()), "Lady belum berpindah selama animasi");
+            check(gm().getLadyResultCount(ladyFrom[0]) == 0, "hasil belum diberitahukan sebelum roh sampai");
+
+            // Konfirmasi kedua (GUI basi / paket ganda) tidak memulai pemeriksaan lagi
+            gm().confirmLadyTarget(holder, ladyTo[0]);
+            gm().giveLadyItem(holder);
+            useSlot(holder, 0);
+            check(!(holder.containerMenu instanceof AvalonMenu), "item Lady tidak bisa dipakai di luar gilirannya");
+            holder.getInventory().clearContent();
+        });
+        waitFor("Lady berpindah ke pemain yang offline", () -> ladyTo[0].equals(gm().getLadyHolder()), 300);
+        run("pemegang baru masuk lagi", () -> {
+            check(gm().getLadyResultCount(ladyFrom[0]) == 1, "hasil pemeriksaan tercatat sekali untuk pemegang lama");
+            check(gm().getLadyPastHolders().contains(ladyFrom[0]) && !gm().getLadyCandidates().contains(ladyFrom[0]),
+                    "yang pernah memegang Lady tidak bisa diperiksa");
+            check(gm().getLadyCandidates().size() == 3, "tersisa 3 pemain yang bisa diperiksa");
+            cmd("fakeplayer spawn " + ladyTo[0]);
+        });
+        waitFor("pemegang baru duduk lagi", () -> p(ladyTo[0]) != null && gm().getOfflineMannequinCount() == 0
+                && onSeat(p(ladyTo[0])), 300);
+        run("cek pemegang baru setelah masuk", () -> {
+            ServerPlayer back = p(ladyTo[0]);
+            check(gm().isLadyHolder(back), "yang diperiksa selagi offline tetap menjadi pemegang Lady");
+            check(!GameManager.isLadyItem(back.getInventory().getItem(0)), "belum gilirannya: tidak diberi item Lady");
+        });
         waitFor("diskusi setelah sabotase", () -> gm().isDiscussionActive(), 600);
         run("skip diskusi (gagal)", AvalonSelfTest::everyoneSkips);
         waitFor("raja berganti setelah misi 2", () -> !gm().isDiscussionActive() && gm().getEvilMissionFails() == 1
@@ -913,6 +1025,50 @@ public final class AvalonSelfTest {
                 waitFor("kembali & mannequin hilang", () -> p(offline[0]) != null && gm().getOfflineMannequinCount() == 0, 200);
             }
             if (m == 0) {
+                // Lady setelah misi ke-3: pemegangnya keluar-masuk di tengah gilirannya
+                final String[] ladyThird = new String[1];
+                waitFor("fase Lady setelah misi 3", () -> gm().isLadyActive(), 600);
+                run("pemegang Lady keluar di tengah gilirannya", () -> {
+                    check(ladyTo[0].equals(gm().getLadyHolder()), "pemegang Lady = yang diperiksa sebelumnya");
+                    check(GameManager.isLadyItem(p(ladyTo[0]).getInventory().getItem(0)), "pemegang baru dapat item Lady");
+                    cmd("fakeplayer remove " + ladyTo[0]);
+                });
+                waitFor("pemegang Lady offline", () -> p(ladyTo[0]) == null && gm().getOfflineMannequinCount() == 1, 100);
+                run("pemegang Lady masuk lagi", () -> {
+                    check(gm().isLadyActive(), "gilirannya menunggu (timer tetap jalan) selagi ia offline");
+                    cmd("fakeplayer spawn " + ladyTo[0]);
+                });
+                waitFor("pemegang Lady duduk lagi", () -> p(ladyTo[0]) != null && gm().getOfflineMannequinCount() == 0
+                        && onSeat(p(ladyTo[0])), 300);
+                run("pemegang Lady melanjutkan memilih", () -> {
+                    ServerPlayer holder = p(ladyTo[0]);
+                    check(gm().isLadyActive(), "gilirannya masih berjalan setelah ia kembali");
+                    check(GameManager.isLadyItem(holder.getInventory().getItem(0)), "item Lady diberikan lagi saat ia kembali");
+                    useSlot(holder, 0);
+                    check(holder.containerMenu instanceof AvalonMenu, "GUI Lady terbuka setelah kembali");
+                    AvalonMenu menu = (AvalonMenu) holder.containerMenu;
+                    int heads = 0;
+                    for (int slot : LadyGUI.POOL_SLOTS) {
+                        String name = LadyGUI.getCandidate(menu.inv().getItem(slot));
+                        if (name == null) continue;
+                        heads++;
+                        check(!name.equals(ladyFrom[0]) && !name.equals(ladyTo[0]), "pemegang lama & diri sendiri tidak bisa dipilih");
+                    }
+                    check(heads == 3, "GUI menampilkan 3 pemain yang bisa diperiksa");
+                    check(ladyFrom[0].equals(menu.inv().getItem(LadyGUI.POOL_SLOTS[3]).getHoverName().getString()),
+                            "pemegang lama ditampilkan (tidak bisa dipilih)");
+                    click(holder, LadyGUI.POOL_SLOTS[3]);
+                    check(LadyGUI.getCandidate(menu.inv().getItem(LadyGUI.TARGET_SLOT)) == null, "pemegang lama tidak bisa dipilih");
+                    click(holder, LadyGUI.POOL_SLOTS[0]);
+                    ladyThird[0] = LadyGUI.getCandidate(menu.inv().getItem(LadyGUI.TARGET_SLOT));
+                    click(holder, LadyGUI.CONFIRM_SLOT);
+                    check(!gm().isLadyActive(), "pemeriksaan dimulai");
+                });
+                waitFor("Lady berpindah ke pemain ketiga", () -> ladyThird[0].equals(gm().getLadyHolder()), 300);
+                run("cek setelah dua pemeriksaan", () -> {
+                    check(gm().getLadyPastHolders().size() == 2, "dua pemain sudah pernah memegang Lady");
+                    check(gm().getLadyResultCount(ladyTo[0]) == 1, "hasil pemeriksaan kedua tercatat");
+                });
                 waitFor("diskusi", () -> gm().isDiscussionActive(), 600);
                 run("skip diskusi", AvalonSelfTest::everyoneSkips);
                 waitFor("raja berganti", () -> !gm().isDiscussionActive() && gm().getCurrentKingName() != null
@@ -994,13 +1150,16 @@ public final class AvalonSelfTest {
             }
             check(gm().getRole(p("a")) == null, "role game sebelumnya dibersihkan");
             cmd("avalon cutscene off");
+            cmd("avalon settimer lady 5");
             cmd("execute as a run avalon startgame");
             check(gm().isGameRunning(), "game kedua berjalan");
+            check(gm().getLadyHolder() == null && gm().getLadyPastHolders().isEmpty(), "Lady game sebelumnya dibersihkan");
         });
         waitFor("game 2: raja pertama memegang buku", AvalonSelfTest::kingHoldsBook, 2400);
 
         // Raja keluar saat gilirannya memilih tim: setelah grace 90 detik raja berikutnya yang memilih
         run("game 2: raja keluar saat memilih tim", () -> {
+            check(gm().getLadyHolder() != null && gm().getLadyPastHolders().isEmpty(), "game 2: Lady mulai dari pemegang baru");
             lastKing = gm().getCurrentKingName();
             cmd("fakeplayer remove " + lastKing);
         });
@@ -1062,6 +1221,34 @@ public final class AvalonSelfTest {
         // Tiga misi sukses beruntun, lalu assassin menembak ke void
         for (int m = 1; m <= 3; m++) {
             quickSuccessMission("game 2 misi " + m);
+            if (m == 1) {
+                run("game 2: tidak ada Lady setelah misi 1", () -> check(!gm().isLadyActive(), "Lady tidak dipakai setelah misi ke-1"));
+            }
+            if (m == 2) {
+                // Pemegang offline sampai waktunya habis: target dipilih acak; ia masuk lagi di tengah animasi
+                final String[] absent = new String[1];
+                waitFor("game 2: fase Lady", () -> gm().isLadyActive(), 600);
+                run("game 2: pemegang Lady keluar", () -> {
+                    absent[0] = gm().getLadyHolder();
+                    cmd("fakeplayer remove " + absent[0]);
+                });
+                waitFor("game 2: waktu habis, target dipilih acak", () -> !gm().isLadyActive(), 300);
+                run("game 2: pemegang masuk di tengah animasi", () -> {
+                    check(p(absent[0]) == null, "pemegang masih offline saat targetnya dipilih acak");
+                    check(!gm().isDiscussionActive() && absent[0].equals(gm().getLadyHolder()), "animasi berjalan, Lady belum berpindah");
+                    cmd("fakeplayer spawn " + absent[0]);
+                });
+                waitFor("game 2: Lady berpindah dari pemegang yang tadi offline", () -> gm().getLadyHolder() != null
+                        && !gm().getLadyHolder().equals(absent[0]), 300);
+                waitFor("game 2: pemegang lama duduk lagi", () -> p(absent[0]) != null && gm().getOfflineMannequinCount() == 0
+                        && onSeat(p(absent[0])), 300);
+                run("game 2: cek pemegang lama", () -> {
+                    ServerPlayer back = p(absent[0]);
+                    check(gm().getLadyResultCount(absent[0]) == 1, "hasil pilihan acak tercatat untuk pemegang yang offline");
+                    check(!gm().isLadyHolder(back) && gm().getLadyPastHolders().contains(absent[0]), "ia bukan pemegang lagi");
+                    check(!GameManager.isLadyItem(back.getInventory().getItem(0)), "ia tidak diberi item Lady");
+                });
+            }
             if (m < 3) {
                 waitFor("game 2: diskusi " + m, () -> gm().isDiscussionActive(), 600);
                 run("game 2: skip diskusi " + m, AvalonSelfTest::everyoneSkips);
@@ -1099,6 +1286,8 @@ public final class AvalonSelfTest {
             check(gm().getRegisteredPlayers().size() == 5, "player tetap terdaftar setelah stopgame");
             check(everyoneInOverworld(), "stopgame memulangkan semua player");
             check(server.isPvpAllowed(), "PvP dikembalikan seperti sebelum game");
+            check(gm().getLadyHolder() == null && gm().getLadyPastHolders().isEmpty() && !gm().isLadyActive(),
+                    "stopgame membersihkan Lady of the Lake");
         });
         sleep(20);
     }

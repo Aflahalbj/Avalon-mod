@@ -15,11 +15,13 @@ import id.avalon.cutscene.PortalCutscene;
 import id.avalon.cutscene.EndingCutscene;
 import id.avalon.cutscene.EndingTimeline;
 import id.avalon.cutscene.KingRouletteTimeline;
+import id.avalon.cutscene.LadyTimeline;
 import id.avalon.cutscene.PillarTimeline;
 import id.avalon.cutscene.PortalTimeline;
 import id.avalon.cutscene.RoleShuffleTimeline;
 import id.avalon.entity.MannequinEntity;
 import id.avalon.entity.ModEntities;
+import id.avalon.gui.AvalonMenu;
 import id.avalon.gui.TeamSelectionGUI;
 import id.avalon.models.Role;
 import id.avalon.network.AvalonNetwork;
@@ -160,6 +162,34 @@ public class GameManager {
     private final Map<UUID, ArmorStand> discussionSkipHeads = new HashMap<>();
     private Task discussionHeadAnimTask;
 
+    // ── Lady of the Lake ──────────────────────────────────────────────────────
+    /** AUTO = hanya untuk game berisi {@link #LADY_AUTO_MIN_PLAYERS} player atau lebih. */
+    public enum LadyMode { AUTO, ON, OFF }
+
+    private static final int LADY_AUTO_MIN_PLAYERS = 7;
+    /** Tag key untuk item Lady of the Lake. */
+    public static final String KEY_LADY_TOKEN = "lady_token";
+    private LadyMode ladyMode = LadyMode.AUTO;
+    private int ladySeconds = 60;
+    /** Pemegang Lady saat ini; null = game ini tidak memakai Lady of the Lake. */
+    private String ladyHolder = null;
+    /** Yang pernah memegang Lady: tidak bisa diperiksa lagi. */
+    private final List<String> ladyPastHolders = new ArrayList<>();
+    /** Pemegang sedang memilih siapa yang diperiksa. */
+    private boolean ladyActive = false;
+    /** Target sudah dipilih dan animasi pemeriksaannya sedang berjalan. */
+    private boolean ladyResolving = false;
+    /** Bagian awal {@link #ladyResolving}: Lady belum berpindah dari pemegang lama ke targetnya. */
+    private boolean ladyLeaving = false;
+    /** Yang sudah diklik pemegang di GUI tapi belum dikonfirmasi; dipakai kalau waktunya habis. */
+    private String ladySelection = null;
+    private boolean ladyAfterSuccess = false;
+    private Task ladyTask;
+    /** Hasil pemeriksaan tiap pemegang (nama → hasil), dikirim ulang kalau ia masuk lagi. */
+    private final Map<String, List<LadyResult>> ladyResults = new HashMap<>();
+
+    private record LadyResult(String target, boolean evil) {}
+
     // ── Assassination state ───────────────────────────────────────────────────
     /** Apakah fase assassination sedang aktif. */
     private boolean assassinationActive = false;
@@ -243,6 +273,14 @@ public class GameManager {
 
     public void setEvilDiscussionSeconds(int evilDiscussionSeconds) {
         this.evilDiscussionSeconds = evilDiscussionSeconds;
+    }
+
+    public int getLadySeconds() {
+        return ladySeconds;
+    }
+
+    public void setLadySeconds(int ladySeconds) {
+        this.ladySeconds = ladySeconds;
     }
 
     public GameManager() {
@@ -441,6 +479,7 @@ public class GameManager {
     public boolean isDismountAllowed()              { return dismountAllowed; }
     public int getCurrentRevealPhase()              { return currentRevealPhase; }
     public boolean isDiscussionActive()             { return discussionActive; }
+    public boolean isLadyActive()                   { return ladyActive; }
     public boolean isAssassinationActive()          { return assassinationActive; }
     public boolean isAssassinBowActive()            { return assassinBowActive; }
     public int getCurrentRound()                    { return currentRound; }
@@ -1305,6 +1344,8 @@ public class GameManager {
         currentKingIndex = 0;
         kingRouletteRunning = true;
         String kingName = kingOrder.get(0);
+        // Lady of the Lake mulai di pemain di kanan raja pertama (yang paling akhir mendapat giliran raja)
+        ladyHolder = isLadyEnabled() ? kingOrder.get(kingOrder.size() - 1) : null;
 
         broadcast(Txt.blank());
         broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.GOLD));
@@ -1375,6 +1416,7 @@ public class GameManager {
                 startTeamSelectionActionBar(kingName);
                 // Mahkota sudah terbentuk di client; ini untuk yang baru masuk / tertinggal paketnya
                 sendCrown(false);
+                announceLadyHolder();
                 // Rajanya keluar selagi animasi berjalan: tanpa ini game menunggunya tanpa batas waktu
                 ensureKingGrace();
             })
@@ -1646,6 +1688,7 @@ public class GameManager {
 
         missionResolving = false;
         sendCrown(false);
+        sendLady(false);
 
         // ── Gudang diisi penuh, rak tiap pilar dibuka sebanyak anggota tim ────
         batteryMission.start(server(), team.size());
@@ -1993,7 +2036,7 @@ public class GameManager {
             triggerEvilWin("3 misi telah disabotase");
             return;
         }
-        startDiscussionPhase(false);
+        startAfterMissionPhase(false);
     }
 
     // ── End Mission ───────────────────────────────────────────────────────────
@@ -2028,10 +2071,16 @@ public class GameManager {
                 setRotation(p, yaw, 0);
             }
             if (currentMission >= 3) {
+                if (!playerRoles.containsValue(Role.ASSASSIN)) {
+                    // Susunan role tanpa Assassin (customrole): tidak ada yang bisa menebak Merlin,
+                    // kubu baik langsung menang
+                    triggerGoodWin();
+                    return;
+                }
                 // Assassin yang sedang offline tetap diberi kesempatan (lihat grace di giveAssassinBow)
                 startAssassinationPhase();
             } else {
-                startDiscussionPhase(true);
+                startAfterMissionPhase(true);
             }
         });
     }
@@ -2041,8 +2090,9 @@ public class GameManager {
      * Rule 5: All Players → Seat + Adventure
      */
     private void teleportAllToSeat() {
-        // Misi sudah selesai: mahkota raja muncul lagi
+        // Misi sudah selesai: mahkota raja & token Lady muncul lagi
         sendCrown(false);
+        sendLady(false);
 
         for (int i = 0; i < Math.min(registeredPlayers.size(), PLAYER_SLAB_POSITIONS.length); i++) {
             ServerPlayer p = getPlayerExact(registeredPlayers.get(i));
@@ -2055,6 +2105,312 @@ public class GameManager {
             Fx.actionBar(p, Txt.blank());
             seatPlayer(p);
         }
+    }
+
+    // ── Lady of the Lake ──────────────────────────────────────────────────────
+
+    public LadyMode getLadyMode() {
+        return ladyMode;
+    }
+
+    /** Dibaca saat raja pertama dipilih (lihat {@link #isLadyDecided()}): sesudah itu baru berlaku di game berikutnya. */
+    public void setLadyMode(LadyMode ladyMode) {
+        this.ladyMode = ladyMode;
+    }
+
+    /** Game yang sedang berjalan sudah menentukan pemegang Lady pertamanya (atau tidak memakainya). */
+    public boolean isLadyDecided() {
+        return gameRunning && !kingOrder.isEmpty();
+    }
+
+    public String getLadySelection() {
+        return ladySelection;
+    }
+
+    public void setLadySelection(String name) {
+        ladySelection = name;
+    }
+
+    /** Apakah game dengan jumlah player terdaftar saat ini memakai Lady of the Lake. */
+    public boolean isLadyEnabled() {
+        return ladyMode == LadyMode.ON
+            || (ladyMode == LadyMode.AUTO && registeredPlayers.size() >= LADY_AUTO_MIN_PLAYERS);
+    }
+
+    public String getLadyHolder() {
+        return ladyHolder;
+    }
+
+    public boolean isLadyHolder(Player player) {
+        return player.getGameProfile().getName().equals(ladyHolder);
+    }
+
+    public List<String> getLadyPastHolders() {
+        return Collections.unmodifiableList(ladyPastHolders);
+    }
+
+    /** Berapa pemeriksaan yang hasilnya sudah dicatat untuk {@code holderName}. */
+    public int getLadyResultCount(String holderName) {
+        List<LadyResult> results = ladyResults.get(holderName);
+        return results == null ? 0 : results.size();
+    }
+
+    /** Yang bisa diperiksa: semua kecuali pemegangnya sendiri dan yang pernah memegang Lady (offline pun boleh). */
+    public List<String> getLadyCandidates() {
+        List<String> list = new ArrayList<>();
+        for (String name : registeredPlayers) {
+            if (!name.equals(ladyHolder) && !ladyPastHolders.contains(name)) list.add(name);
+        }
+        return list;
+    }
+
+    /** Umumkan pemegang Lady pertama (bersamaan dengan raja pertama); tokennya terbentuk di badannya. */
+    private void announceLadyHolder() {
+        if (ladyHolder == null) return;
+        broadcast(
+            Txt.t("  🌊 Lady of the Lake dipegang oleh ", ChatFormatting.AQUA)
+                .append(Txt.t(ladyHolder, ChatFormatting.WHITE, ChatFormatting.BOLD))
+        );
+        broadcast(Txt.t("  Setelah misi ke-2, 3 dan 4 ia memeriksa kesetiaan satu pemain.", ChatFormatting.GRAY));
+        broadcast(Txt.blank());
+        sendLady(true);
+    }
+
+    /** Kirim token Lady ke semua player ({@code animate} = muncul / terbang dari pemegang sebelumnya). */
+    private void sendLady(boolean animate) {
+        for (ServerPlayer p : getOnlinePlayers()) sendLadyTo(p, animate);
+    }
+
+    private void sendLadyTo(ServerPlayer p, boolean animate) {
+        // Disembunyikan bersama mahkota raja: selama misi dan selagi raja pertama belum diumumkan
+        if (ladyHolder == null || missionActive || kingRouletteRunning) {
+            AvalonNetwork.sendTo(p, AvalonNetwork.Lady.NONE);
+            return;
+        }
+        AvalonNetwork.sendTo(p, new AvalonNetwork.Lady(ladyHolder, registeredPlayers.indexOf(ladyHolder), animate));
+    }
+
+    /** Berikan item Lady of the Lake ke pemegangnya. */
+    public void giveLadyItem(ServerPlayer player) {
+        ItemStack token = AvalonItems.named(
+            Items.HEART_OF_THE_SEA,
+            Txt.t("Lady of the Lake", ChatFormatting.AQUA, ChatFormatting.BOLD),
+            List.of(
+                Txt.t("Klik kanan untuk memilih pemain", ChatFormatting.GRAY),
+                Txt.t("yang kesetiaannya kamu periksa.", ChatFormatting.GRAY)
+            )
+        );
+        AvalonItems.setTag(token, KEY_LADY_TOKEN, "true");
+        player.getInventory().setItem(0, token);
+    }
+
+    /** Cek apakah item adalah item Lady of the Lake. */
+    public static boolean isLadyItem(ItemStack item) {
+        if (item == null || item.isEmpty() || !item.is(Items.HEART_OF_THE_SEA)) return false;
+        return AvalonItems.hasTag(item, KEY_LADY_TOKEN);
+    }
+
+    private void stopLadyTask() {
+        if (ladyTask != null) {
+            ladyTask.cancel();
+            ladyTask = null;
+        }
+    }
+
+    /**
+     * Seusai misi (semua sudah kembali duduk): Lady of the Lake dulu kalau ini gilirannya (misi ke-2,
+     * 3 dan 4), baru fase diskusi. Game yang sudah ditentukan pemenangnya tidak lewat sini.
+     */
+    private void startAfterMissionPhase(boolean afterSuccess) {
+        if (!gameRunning) return;
+        if (ladyHolder != null && currentRound >= 2 && currentRound <= 4 && !getLadyCandidates().isEmpty()) {
+            startLadyPhase(afterSuccess);
+        } else {
+            startDiscussionPhase(afterSuccess);
+        }
+    }
+
+    /**
+     * Pemegang Lady memilih satu pemain lewat GUI. Waktunya habis (termasuk kalau ia sedang offline):
+     * targetnya dipilih acak.
+     */
+    private void startLadyPhase(boolean afterSuccess) {
+        ladyActive = true;
+        ladySelection = null;
+        ladyAfterSuccess = afterSuccess;
+        final String holderName = ladyHolder;
+
+        broadcast(Txt.blank());
+        broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.AQUA));
+        broadcast(Txt.t("  🌊 LADY OF THE LAKE", ChatFormatting.AQUA, ChatFormatting.BOLD));
+        broadcast(
+            Txt.t("  ", ChatFormatting.WHITE)
+                .append(Txt.t(holderName, ChatFormatting.WHITE, ChatFormatting.BOLD))
+                .append(Txt.t(" akan memeriksa kesetiaan satu pemain.", ChatFormatting.WHITE))
+        );
+        broadcast(Txt.t("  Waktu memilih " + ladySeconds + " detik. Kalau habis, dipilih acak.", ChatFormatting.GRAY));
+        broadcast(Txt.t("━━━━━━━━━━━━━━━━━━━━━━━━", ChatFormatting.AQUA));
+        broadcast(Txt.blank());
+
+        ServerPlayer holder = getPlayerExact(holderName);
+        if (holder != null) {
+            Fx.title(holder,
+                "§b§l🌊 LADY OF THE LAKE",
+                "§fKlik kanan untuk memilih pemain yang kamu periksa",
+                10, 70, 20
+            );
+            Fx.sound(holder, SoundEvents.CONDUIT_ACTIVATE, 1f, 1.2f);
+            giveLadyItem(holder);
+        } else {
+            broadcast(
+                Txt.t("  🌊 Pemegang Lady offline! Target dipilih acak jika ia tidak kembali sebelum waktu habis.", ChatFormatting.AQUA)
+            );
+        }
+
+        stopLadyTask();
+        ladyTask = new Task() {
+            int seconds = ladySeconds;
+
+            @Override
+            public void run() {
+                if (!gameRunning || !ladyActive) { cancel(); return; }
+
+                if (seconds <= 0) {
+                    cancel();
+                    List<String> candidates = getLadyCandidates();
+                    // Sudah memilih di GUI tapi belum menekan konfirmasi: pilihannya yang dipakai
+                    if (ladySelection != null && candidates.contains(ladySelection)) {
+                        resolveLady(ladySelection, false);
+                    } else {
+                        resolveLady(candidates.get((int) (Math.random() * candidates.size())), true);
+                    }
+                    return;
+                }
+
+                ChatFormatting timeColor = seconds > 30
+                    ? ChatFormatting.GREEN
+                    : (seconds > 10 ? ChatFormatting.YELLOW : ChatFormatting.RED);
+
+                Component bar = Txt.t("🌊 Lady of the Lake | ", ChatFormatting.AQUA)
+                    .append(Txt.t(String.format("%d:%02d", seconds / 60, seconds % 60), timeColor, ChatFormatting.BOLD))
+                    .append(Txt.t(" | Menunggu " + holderName + " memilih...", ChatFormatting.GRAY));
+
+                for (ServerPlayer p : getOnlinePlayers()) {
+                    Fx.actionBar(p, bar);
+                }
+
+                seconds--;
+            }
+        }.runTimer(0L, 20L);
+    }
+
+    /** Dipanggil LadyListener saat pemegang mengonfirmasi pilihannya di GUI. */
+    public void confirmLadyTarget(ServerPlayer holder, String target) {
+        // GUI yang masih terbuka setelah fasenya lewat tidak boleh memulai pemeriksaan
+        if (!gameRunning || !ladyActive || !isLadyHolder(holder)) return;
+        if (!getLadyCandidates().contains(target)) return;
+        resolveLady(target, false);
+    }
+
+    /**
+     * Target sudah ditentukan: mainkan animasinya (lihat LadyTimeline), beri tahu hasilnya hanya ke
+     * pemegang, pindahkan Lady ke target, lalu lanjut ke fase diskusi.
+     */
+    private void resolveLady(String target, boolean random) {
+        final String holderName = ladyHolder;
+        Role role = getRoleByName(target);
+        final boolean evil = role != null && role.isEvil();
+
+        ladyActive = false;
+        ladyResolving = true;
+        ladyLeaving = true;
+        ladySelection = null;
+        stopLadyTask();
+
+        ServerPlayer holder = getPlayerExact(holderName);
+        if (holder != null) {
+            // Waktunya habis selagi GUI-nya masih terbuka
+            if (holder.containerMenu instanceof AvalonMenu) holder.closeContainer();
+            Inventory inv = holder.getInventory();
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                if (isLadyItem(inv.getItem(i))) inv.setItem(i, ItemStack.EMPTY);
+            }
+        }
+        for (ServerPlayer p : getOnlinePlayers()) {
+            Fx.actionBar(p, Txt.blank());
+        }
+
+        broadcast(
+            Txt.t("  🌊 ", ChatFormatting.AQUA)
+                .append(Txt.t(holderName, ChatFormatting.WHITE, ChatFormatting.BOLD))
+                .append(Txt.t(" memeriksa kesetiaan ", ChatFormatting.AQUA))
+                .append(Txt.t(target, ChatFormatting.WHITE, ChatFormatting.BOLD))
+                .append(Txt.t(random ? " (waktu habis, dipilih acak)." : ".", ChatFormatting.AQUA))
+        );
+
+        // Kubu target hanya dikirim ke client si pemegang; yang lain melihat roh yang sama polosnya
+        int targetSeat = registeredPlayers.indexOf(target);
+        int holderSeat = registeredPlayers.indexOf(holderName);
+        for (ServerPlayer p : getOnlinePlayers()) {
+            int result = p != holder ? AvalonNetwork.LadyInspect.HIDDEN
+                : (evil ? AvalonNetwork.LadyInspect.EVIL : AvalonNetwork.LadyInspect.GOOD);
+            AvalonNetwork.sendTo(p, new AvalonNetwork.LadyInspect(target, targetSeat, holderName, holderSeat, result));
+        }
+
+        later(LadyTimeline.ARRIVE, () -> {
+            // Dicatat juga untuk pemegang yang sedang offline: ia diberi tahu saat masuk lagi
+            ladyResults.computeIfAbsent(holderName, k -> new ArrayList<>()).add(new LadyResult(target, evil));
+            ServerPlayer h = getPlayerExact(holderName);
+            if (h != null) {
+                Fx.title(h,
+                    evil ? "§c§lKUBU JAHAT" : "§b§lKUBU BAIK",
+                    "§f" + target + " §7— hanya kamu yang tahu",
+                    5, 80, 20
+                );
+                sendLadyResult(h, new LadyResult(target, evil));
+                h.sendSystemMessage(Txt.t("  Hanya kamu yang tahu. Kamu boleh jujur, boleh juga berbohong.", ChatFormatting.GRAY, ChatFormatting.ITALIC));
+                h.sendSystemMessage(Txt.blank());
+            }
+            ServerPlayer t = getPlayerExact(target);
+            if (t != null) {
+                Fx.title(t, "§b§l🌊 KAMU DIPERIKSA", "§f" + holderName + " §7kini tahu kubumu", 5, 60, 20);
+            }
+        });
+
+        later(LadyTimeline.TOKEN, () -> {
+            ladyPastHolders.add(holderName);
+            ladyHolder = target;
+            ladyLeaving = false;
+            sendLady(true);
+            broadcast(
+                Txt.t("  🌊 Lady of the Lake berpindah ke ", ChatFormatting.AQUA)
+                    .append(Txt.t(target, ChatFormatting.WHITE, ChatFormatting.BOLD))
+            );
+        });
+
+        later(LadyTimeline.END, () -> {
+            ladyResolving = false;
+            startDiscussionPhase(ladyAfterSuccess);
+        });
+    }
+
+    private void sendLadyResult(ServerPlayer p, LadyResult result) {
+        p.sendSystemMessage(
+            Txt.t("  🌊 ", ChatFormatting.AQUA)
+                .append(Txt.t(result.target(), ChatFormatting.WHITE, ChatFormatting.BOLD))
+                .append(Txt.t(" adalah ", ChatFormatting.AQUA))
+                .append(result.evil()
+                    ? Txt.t("Kubu Jahat", ChatFormatting.RED, ChatFormatting.BOLD)
+                    : Txt.t("Kubu Baik", ChatFormatting.AQUA, ChatFormatting.BOLD))
+        );
+    }
+
+    /** Player masuk lagi: semua hasil pemeriksaannya dikirim ulang (bisa saja ia offline saat itu). */
+    private void sendLadyResults(ServerPlayer p) {
+        List<LadyResult> results = ladyResults.get(p.getGameProfile().getName());
+        if (results == null) return;
+        for (LadyResult result : results) sendLadyResult(p, result);
+        p.sendSystemMessage(Txt.blank());
     }
 
     // ── Discussion Phase ──────────────────────────────────────────────────────
@@ -2942,6 +3298,7 @@ public class GameManager {
             PlayerScale.set(p, 1.0);
             unlockCamera(p);
             AvalonNetwork.sendTo(p, AvalonNetwork.Crown.NONE);
+            AvalonNetwork.sendTo(p, AvalonNetwork.Lady.NONE);
         }
 
         EndingCutscene.play(this, avalon, type, good, evil, merlin, assassin, false, finish);
@@ -3086,6 +3443,16 @@ public class GameManager {
             return;
         }
 
+        // Fase Lady — pemegangnya offline: timernya tetap jalan, habis = dipilih acak
+        if (ladyActive) {
+            if (name.equals(ladyHolder)) {
+                broadcast(
+                    Txt.t("  🌊 Pemegang Lady offline! Target dipilih acak jika ia tidak kembali sebelum waktu habis.", ChatFormatting.AQUA)
+                );
+            }
+            return;
+        }
+
         if (discussionActive) {
             // Hapus vote skip player yang DC agar tidak menggantung hitungan
             discussionSkipVotes.remove(player.getUUID());
@@ -3171,10 +3538,19 @@ public class GameManager {
             player.sendSystemMessage(Txt.t("══════════════════════", ChatFormatting.GOLD));
             // Bisa saja ia offline selama fase perkenalan: tanpa ini ia tidak pernah tahu
             if (revealFinished) sendRevealNames(player);
+            sendLadyResults(player);
+            // Bisa saja ia diperiksa (dan menerima Lady) selagi offline. Selagi gilirannya memilih,
+            // petunjuknya datang bersama itemnya (lihat syncToPhase). Pemegang pertama yang belum
+            // diumumkan dan pemegang yang Lady-nya sedang berpindah tidak diberi tahu.
+            if (name.equals(ladyHolder) && !ladyActive && !kingRouletteRunning && !ladyLeaving) {
+                player.sendSystemMessage(Txt.t("  🌊 Kamu memegang Lady of the Lake.", ChatFormatting.AQUA));
+                player.sendSystemMessage(Txt.blank());
+            }
         }
 
-        // Mahkota raja yang sedang aktif
+        // Mahkota raja yang sedang aktif & token Lady
         sendCrownTo(player, false);
+        sendLadyTo(player, false);
 
         // 4. Cancel grace timer jika pemain yang bersangkutan kembali
         String kingName = getCurrentKingName();
@@ -3226,6 +3602,7 @@ public class GameManager {
     public void handlePlayerRespawn(ServerPlayer player) {
         if (!gameRunning || countdownTask != null) return;
         sendCrownTo(player, false);
+        sendLadyTo(player, false);
         syncToPhase(player, null);
     }
 
@@ -3321,6 +3698,18 @@ public class GameManager {
                 // Kubu baik: duduk kembali, gerakan dikunci
                 seatPlayer(player);
                 lockMovement(player);
+            }
+            return;
+        }
+
+        // ── Lady of the Lake (memilih, lalu animasi pemeriksaannya) ──────────
+        if (ladyActive || ladyResolving) {
+            seatPlayer(player);
+            if (ladyActive && name.equals(ladyHolder)) {
+                giveLadyItem(player);
+                player.sendSystemMessage(
+                    Txt.t("  🌊 Kamu memegang Lady of the Lake. Klik kanan untuk memilih pemain yang diperiksa.", ChatFormatting.AQUA)
+                );
             }
             return;
         }
@@ -3649,6 +4038,7 @@ public class GameManager {
         if (teamSelectionActionBarTask != null) { teamSelectionActionBarTask.cancel(); teamSelectionActionBarTask = null; }
 
         stopDiscussionPhase();
+        stopLadyTask();
         stopHotbarLock();
         stopSabotageMechanic();
 
@@ -3684,6 +4074,13 @@ public class GameManager {
         discussionAfterSuccess = false;
         discussionSkipVotes.clear();
         removeDiscussionSkipItems();
+        ladyActive = false;
+        ladyResolving = false;
+        ladyLeaving = false;
+        ladySelection = null;
+        ladyHolder = null;
+        ladyPastHolders.clear();
+        ladyResults.clear();
         assassinationActive = false;
         assassinShotFired = false;
         assassinBowActive = false;
@@ -3721,6 +4118,7 @@ public class GameManager {
             unlockMovement(p);
             AvalonNetwork.sendTo(p, AvalonNetwork.Reveal.END);
             AvalonNetwork.sendTo(p, AvalonNetwork.Crown.NONE);
+            AvalonNetwork.sendTo(p, AvalonNetwork.Lady.NONE);
             AvalonNetwork.sendTo(p, new AvalonNetwork.OneSlot(false));
         }
         lockedYaw.clear();

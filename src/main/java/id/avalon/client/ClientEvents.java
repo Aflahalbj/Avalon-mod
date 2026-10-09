@@ -70,6 +70,7 @@ public final class ClientEvents {
                 RevealClient.tick();
                 KingRouletteClient.tick();
                 CrownClient.tick();
+                LadyClient.tick();
                 OneSlotHud.tick();
                 RackClient.tick();
                 PillarCutsceneClient.tick();
@@ -182,6 +183,7 @@ public final class ClientEvents {
             RevealClient.render(event);
             KingRouletteClient.render(event);
             CrownClient.render(event);
+            LadyClient.render(event);
             PillarOrbRenderer.render(event);
             GateRenderer.render(event);
             EndingClient.render(event);
@@ -246,6 +248,7 @@ public final class ClientEvents {
             int width = event.getWindow().getGuiScaledWidth();
             int height = event.getWindow().getGuiScaledHeight();
             RoleShuffleClient.renderOverlay(event.getGuiGraphics(), width, height, event.getPartialTick());
+            LadyClient.renderOverlay(event.getGuiGraphics(), width, height, event.getPartialTick());
             PortalCutsceneClient.renderOverlay(event.getGuiGraphics(), width, height);
             PillarCutsceneClient.renderOverlay(event.getGuiGraphics(), width, height);
             EndingClient.renderOverlay(event.getGuiGraphics(), width, height);
@@ -291,6 +294,7 @@ public final class ClientEvents {
             RevealClient.stop(false);
             KingRouletteClient.stop();
             CrownClient.set("", -1, false);
+            LadyClient.set("", -1, false);
             PillarOrbRenderer.clear();
             PillarCutsceneClient.reset();
             EndingClient.reset();
